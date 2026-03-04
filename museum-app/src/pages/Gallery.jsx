@@ -153,21 +153,32 @@ function Exhibition({ itemCount, active, setActive }) {
     const paintings = useMemo(() => Array.from({ length: itemCount }, (_, i) => AVAILABLE_IMAGES[i % AVAILABLE_IMAGES.length]), [itemCount])
 
     const layout = useMemo(() => {
+        const isMobile = height > width; // Portrait aspect ratio check
+
         return paintings.map((url, i) => {
+            const row = isMobile ? i : Math.floor(i / 2);
+
+            // X positioning: 
+            // Mobile: Centered in a single column
+            // Desktop: Staggered left and right
             const isLeft = i % 2 === 0;
-            const x = isLeft ? -width / 4 : width / 4;
-            const row = Math.floor(i / 2);
+            const x = isMobile ? 0 : (isLeft ? -width / 4 : width / 4);
+
             // Shift the entire gallery down by 1.5 viewport heights to give room for the intro text
             const yOffset = -height * 1.5;
+
             // Stagger items deeply vertically
-            const y = -row * (height * 0.8) + yOffset;
+            // Mobile: More vertical space between the larger items
+            const spacing = isMobile ? (height * 0.45) : (height * 0.8);
+            const y = -row * spacing + yOffset;
 
             // Target fixed width, height will be calculated automatically by GalleryImage
-            const targetWidth = width / 2.8;
+            // Mobile: Massive increase in size (66% of screen width vs 35% on desktop)
+            const targetWidth = isMobile ? (width / 1.5) : (width / 2.8);
 
             return {
                 url,
-                position: [x, y, 0], // Strict perfectly aligned sequence from 1 to 56
+                position: [x, y, 0], // Strict perfectly aligned sequence
                 targetWidth
             }
         })
