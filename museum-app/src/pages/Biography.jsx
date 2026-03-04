@@ -4,7 +4,7 @@ import { useTexture, Sparkles, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, useScroll, useTransform } from 'framer-motion';
 import PageTransition from '../components/PageTransition';
 
 function StarryDome() {
@@ -101,6 +101,11 @@ export default function Biography() {
         }
     ];
 
+    const { scrollYProgress } = useScroll();
+    // Parallax effect: image moves slightly slower than the scroll
+    const heroY = useTransform(scrollYProgress, [0, 1], ['0%', '50%']);
+    const heroOpacity = useTransform(scrollYProgress, [0, 0.2], [1, 0]);
+
     return (
         <PageTransition>
             <div style={{ backgroundColor: '#000000', minHeight: '100vh', width: '100vw', position: 'relative' }}>
@@ -108,25 +113,61 @@ export default function Biography() {
                 {/* The Fast 3D Layer */}
                 <BackgroundScene />
 
-                {/* Minimalist Top Nav */}
-                <button
-                    onClick={() => navigate('/hub')}
-                    className="sans"
-                    style={{
-                        position: 'fixed', top: 40, left: 40, zIndex: 100,
-                        background: 'transparent', color: 'rgba(255,255,255,0.7)',
-                        border: 'none', cursor: 'pointer',
-                        textTransform: 'uppercase', letterSpacing: '3px', fontSize: '0.75rem',
-                        transition: 'all 0.4s ease'
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.transform = 'translateX(-5px)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; e.currentTarget.style.transform = 'translateX(0)'; }}
-                >
-                    ← Return to Hub
-                </button>
+                {/* Minimalist Top Nav removed (Using Global Navbar) */}
+
+                {/* Ultra-Premium Hero Section */}
+                <div style={{ position: 'relative', height: '100vh', width: '100%', overflow: 'hidden', zIndex: 5 }}>
+                    <motion.div
+                        style={{
+                            position: 'absolute',
+                            top: 0, left: 0, width: '100%', height: '120%', // Taller to allow parallax scrolling
+                            y: heroY,
+                            opacity: heroOpacity
+                        }}
+                    >
+                        <motion.img
+                            initial={{ scale: 1.1, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ duration: 1.8, ease: [0.16, 1, 0.3, 1] }}
+                            src="/abouthero.webp"
+                            alt="Van Gogh Hero"
+                            style={{
+                                width: '100%', height: '100%', objectFit: 'cover',
+                                filter: 'brightness(0.65) contrast(1.1)' // Moody aesthetic
+                            }}
+                        />
+                        {/* Gradient to blend smoothly into the black background below */}
+                        <div style={{
+                            position: 'absolute', bottom: 0, left: 0, width: '100%', height: '40vh',
+                            background: 'linear-gradient(to top, #000000 0%, transparent 100%)'
+                        }} />
+                    </motion.div>
+
+                    {/* Hero Typography */}
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerEvents: 'none' }}>
+                        <motion.h1
+                            initial={{ opacity: 0, y: 30 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 1.2, delay: 0.4, ease: [0.25, 1, 0.5, 1] }}
+                            className="serif"
+                            style={{ fontSize: 'clamp(3.5rem, 10vw, 7rem)', color: '#ffffff', m: 0, letterSpacing: '2px', fontWeight: 300, textAlign: 'center', textShadow: '0 10px 30px rgba(0,0,0,0.8)' }}
+                        >
+                            The Man.
+                        </motion.h1>
+                        <motion.p
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ duration: 1.2, delay: 0.8, ease: [0.25, 1, 0.5, 1] }}
+                            className="sans"
+                            style={{ fontSize: 'clamp(0.85rem, 2vw, 1.1rem)', color: 'rgba(255,255,255,0.7)', letterSpacing: '6px', textTransform: 'uppercase', marginTop: '1rem' }}
+                        >
+                            Tragedy & Triumph
+                        </motion.p>
+                    </div>
+                </div>
 
                 {/* Ultra-Smooth Scrolling Typography Layout */}
-                <div style={{ position: 'relative', zIndex: 10, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '25vh', paddingBottom: '30vh' }}>
+                <div style={{ position: 'relative', zIndex: 10, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '10vh', paddingBottom: '30vh' }}>
 
                     {narrativeData.map((data, index) => (
                         <motion.div

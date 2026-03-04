@@ -1,12 +1,12 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 
-// Apple-like smooth cinematic transition curves
-const transition = { duration: 1.2, ease: [0.43, 0.13, 0.23, 0.96] };
+// Apple-like snappy cinematic transition curves
+const transition = { duration: 0.4, ease: [0.25, 1, 0.5, 1] };
 
 const pageVariants = {
-    initial: { opacity: 0, scale: 1.15, filter: 'blur(20px)' },
-    animate: { opacity: 1, scale: 1, filter: 'blur(0px)', transition },
+    initial: { opacity: 0, y: 60 },
+    animate: { opacity: 1, y: 0, transition },
 };
 
 export default function PageTransition({ children, style }) {
@@ -21,6 +21,7 @@ export default function PageTransition({ children, style }) {
                 left: 0,
                 width: '100%',
                 height: '100%',
+                willChange: 'filter, transform, opacity',
                 ...style
             }}
         >

@@ -5,6 +5,11 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
+    // Disable module preloading so heavy chunks (like Three.js) don't block the initial render on lightweight pages
+    modulePreload: false,
+    // Inline small CSS to eliminate render-blocking requests
+    cssCodeSplit: false,
+    assetsInlineLimit: 4096,
     // No sourcemaps in production for security (hides source code)
     sourcemap: false,
     // Increase chunk warning limit for 3D assets
@@ -20,11 +25,19 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        // Smart chunk splitting for caching
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-three': ['three', '@react-three/fiber', '@react-three/drei'],
-          'vendor-motion': ['framer-motion'],
+        manualChunks(id) {
+          // Three.js and 3D libs in their own chunk - ONLY loaded on Gallery/Biography
+          if (id.includes('three') || id.includes('@react-three') || id.includes('postprocessing') || id.includes('maath')) {
+            return 'vendor-three';
+          }
+          // Framer Motion in its own chunk
+          if (id.includes('framer-motion') || id.includes('motion')) {
+            return 'vendor-motion';
+          }
+          // React core - tiny, always needed
+          if (id.includes('react-dom') || id.includes('react-router') || id.includes('/react/')) {
+            return 'vendor-react';
+          }
         },
       },
     },

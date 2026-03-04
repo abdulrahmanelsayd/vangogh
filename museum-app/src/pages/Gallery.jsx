@@ -44,7 +44,10 @@ function Lens({ children, damping = 0.2, ...props }) {
     )
 }
 
-function GalleryImage({ url, position, targetWidth, active, setActive }) {
+const worldPos = new THREE.Vector3();
+
+// Image component wrapped in Suspense for performant, individual loading
+function GalleryImageSuspended({ url, position, targetWidth, active, setActive }) {
     const ref = useRef()
     const [hovered, hover] = useState(false)
     const texture = useTexture(url)
@@ -57,9 +60,38 @@ function GalleryImage({ url, position, targetWidth, active, setActive }) {
     const isAnyActive = active !== null
 
     useFrame((state, delta) => {
-        // Dim unhovered/inactive items for a dramatic museum feel, map inactive to pitch black
-        const targetColor = isActive ? '#ffffff' : (isAnyActive ? '#000000' : (hovered ? '#ffffff' : '#444444'));
-        ref.current.material.color.lerp(new THREE.Color().set(targetColor), hovered || isActive ? 0.3 : 0.05)
+        if (!ref.current) return;
+
+        // Auto-illuminate paintings as they scroll into the center of the viewport (Fixes Mobile Hover issue)
+        ref.current.getWorldPosition(worldPos);
+        const distY = Math.abs(worldPos.y);
+        const vh = state.viewport.height;
+        // Peak brightness at center, dimming towards the edges
+        const focus = 1.0 - (distY / (vh * 0.6));
+        const dynamicBrightness = THREE.MathUtils.clamp(focus + 0.2, 0.3, 1.0);
+
+        // Dim unactive items or highlight the focal painting dynamically without needing mouse hover
+        let targetColorObj;
+        if (isActive || hovered) {
+            targetColorObj = new THREE.Color('#ffffff');
+        } else if (isAnyActive) {
+            targetColorObj = new THREE.Color('#000000');
+        } else {
+            targetColorObj = new THREE.Color().setScalar(dynamicBrightness);
+        }
+
+        ref.current.material.color.lerp(targetColorObj, hovered || isActive ? 0.3 : 0.1)
+
+        // Initialize opacity to 0 just once on the JS side, avoiding React overwrites on hover
+        if (ref.current.userData.fading === undefined) {
+            ref.current.material.opacity = 0;
+            ref.current.userData.fading = true;
+        }
+
+        // Fluidly fade the painting in once loaded
+        if (ref.current.material.opacity < 1) {
+            ref.current.material.opacity = THREE.MathUtils.lerp(ref.current.material.opacity, 1.0, 0.05);
+        }
 
         // Make the active painting massive to take up the cinematic view
         const targetScale = isActive ? [scale[0] * 2.8, scale[1] * 2.8, scale[2]] : (hovered && !isAnyActive ? [scale[0] * 1.05, scale[1] * 1.05, scale[2]] : scale);
@@ -79,6 +111,8 @@ function GalleryImage({ url, position, targetWidth, active, setActive }) {
             position={position}
             scale={scale}
             url={url}
+            transparent
+            toneMapped={false}
             onPointerOver={() => hover(true)}
             onPointerOut={() => hover(false)}
             onClick={(e) => {
@@ -87,6 +121,21 @@ function GalleryImage({ url, position, targetWidth, active, setActive }) {
                 else setActive(url)
             }}
         />
+    )
+}
+
+function GalleryImage({ url, position, targetWidth, active, setActive }) {
+    // Individual Suspense boundary ensures the global page transition isn't blocked
+    // while each of the 56 massive textures download and decode.
+    return (
+        <Suspense fallback={
+            <mesh position={position}>
+                <planeGeometry args={[targetWidth, targetWidth]} />
+                <meshBasicMaterial transparent opacity={0} color="#000000" />
+            </mesh>
+        }>
+            <GalleryImageSuspended url={url} position={position} targetWidth={targetWidth} active={active} setActive={setActive} />
+        </Suspense>
     )
 }
 
@@ -133,12 +182,67 @@ function Exhibition({ itemCount, active, setActive }) {
     )
 }
 
+function HeroPosterSuspended() {
+    const { width, height } = useThree((state) => state.viewport)
+    const ref = useRef()
+
+    // Pre-cache texture so shader doesn't blind-render
+    useTexture('/galleryhero.jpg')
+
+    useFrame((state, delta) => {
+        if (!ref.current) return;
+        // Slide up softly aligning with the primary animations
+        easing.damp3(ref.current.position, [0, 0, -20], 0.4, delta)
+
+        // Ensure fade-in initialization preventing harsh popping
+        if (ref.current.children[0].material.opacity < 1) {
+            ref.current.children[0].material.opacity = THREE.MathUtils.lerp(ref.current.children[0].material.opacity, 1.0, 0.05);
+        }
+    })
+
+    return (
+        <group ref={ref} position={[0, -height * 0.2, -20]}>
+            <ImageImpl
+                url="/galleryhero.jpg"
+                scale={[width * 1.6, height * 1.6, 1]}
+                transparent
+                opacity={0} // CSS-style manual tween inside useFrame
+                toneMapped={false}
+            />
+            <mesh position={[0, 0, 0.1]}>
+                <planeGeometry args={[width * 1.6, height * 1.6]} />
+                <meshBasicMaterial color="#000000" transparent opacity={0.65} />
+            </mesh>
+            {/* Visual gradient transition hack to blend hero into black gallery */}
+            <mesh position={[0, -height * 0.8, 0.2]}>
+                <planeGeometry args={[width * 1.6, height * 0.4]} />
+                <meshBasicMaterial color="#000000" transparent opacity={0.85} />
+            </mesh>
+        </group>
+    )
+}
+
+function HeroPoster() {
+    return (
+        <Suspense fallback={null}>
+            <HeroPosterSuspended />
+        </Suspense>
+    )
+}
+
 function Typography() {
     const { width, height } = useThree((state) => state.viewport)
     const shared = { letterSpacing: -0.04, color: '#ffffff' }
+    const ref = useRef()
+
+    // Slide up from bottom natively via frame physics (much faster damp factor)
+    useFrame((state, delta) => {
+        if (!ref.current) return;
+        easing.damp3(ref.current.position, [0, height / 8, -5], 0.3, delta)
+    })
 
     return (
-        <group position={[0, height / 8, -5]}>
+        <group ref={ref} position={[0, height / 8 - height * 0.4, -5]}>
             <Text children="the" position={[-width / 8, height / 10, 0]} fontSize={width / 18} {...shared} fillOpacity={0.4} />
             <Text children="ABSOLUTE" position={[0, -height / 15, 0]} fontSize={width / 5} textAlign="center" {...shared} fillOpacity={0.6} />
 
@@ -160,19 +264,7 @@ export default function Gallery() {
     return (
         <PageTransition>
             <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000000', overflow: 'hidden' }}>
-                <button
-                    onClick={() => navigate('/hub')}
-                    className="sans"
-                    style={{
-                        position: 'absolute', top: 30, left: 30, zIndex: 100,
-                        background: 'transparent', color: '#ffffff', border: '1px solid rgba(255,255,255,0.2)',
-                        borderRadius: '50px', padding: '10px 25px', cursor: 'pointer',
-                        textTransform: 'uppercase', letterSpacing: '4px', fontSize: '0.7rem',
-                        backdropFilter: 'blur(10px)', transition: 'all 0.4s ease'
-                    }}
-                >
-                    ← Return
-                </button>
+                {/* Global Navigation now handles Return routing */}
 
 
 
@@ -183,7 +275,7 @@ export default function Gallery() {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
+                            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
                             style={{
                                 position: 'absolute', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 50,
                                 pointerEvents: 'none',
@@ -196,7 +288,7 @@ export default function Gallery() {
                                 initial={{ x: 100, opacity: 0 }}
                                 animate={{ x: 0, opacity: 1 }}
                                 exit={{ x: 50, opacity: 0 }}
-                                transition={{ duration: 1.2, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                                transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
                                 style={{
                                     width: 'clamp(280px, 85vw, 550px)',
                                     height: '80vh', display: 'flex', flexDirection: 'column', justifyContent: 'center',
@@ -230,17 +322,19 @@ export default function Gallery() {
                     )}
                 </AnimatePresence>
 
-                <div
+                <motion.div
+                    initial={{ opacity: 0, y: 40 }}
+                    animate={{ opacity: active ? 0 : 1, y: active ? 40 : 0 }}
+                    transition={{ duration: 0.5, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
                     className="serif"
                     style={{
-                        position: 'absolute', bottom: 30, right: 30, zIndex: 100,
-                        color: 'rgba(255,255,255,0.5)', fontSize: '1.2rem', fontStyle: 'italic', letterSpacing: '3px',
+                        position: 'absolute', bottom: 'clamp(85px, 10vh, 120px)', right: 30, zIndex: 100,
+                        color: 'rgba(255,255,255,0.5)', fontSize: 'clamp(0.8rem, 2vw, 1.2rem)', fontStyle: 'italic', letterSpacing: '1px',
                         pointerEvents: 'none',
-                        opacity: active ? 0 : 1, transition: 'opacity 0.6s ease'
                     }}
                 >
                     The Infinite Gallery • Scroll Down
-                </div>
+                </motion.div>
 
                 <Canvas camera={{ position: [0, 0, 20], fov: 15 }}>
                     <color attach="background" args={['#000000']} />
@@ -248,6 +342,7 @@ export default function Gallery() {
                         <ScrollControls damping={0.2} pages={pages} distance={0.5} enabled={!active}>
                             <Lens>
                                 <Scroll>
+                                    <HeroPoster />
                                     <Typography />
                                     <Exhibition itemCount={TOTAL_PAINTINGS} active={active} setActive={setActive} />
                                 </Scroll>
