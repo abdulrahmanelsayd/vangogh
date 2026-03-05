@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../lib/supabase';
 import { timeAgo } from '../../utils/timeAgo';
@@ -167,6 +167,43 @@ export default function PostCard({ post, user, onLike, onDelete }) {
     /* ── Threading ── */
     const topLevel = comments.filter(c => !c.parent_id);
     const getReplies = (pid) => comments.filter(c => c.parent_id === pid);
+
+    /* ── Realtime: live comments ── */
+    useEffect(() => {
+        const channel = supabase
+            .channel(`comments-${post.id}`)
+            .on('postgres_changes', {
+                event: 'INSERT', schema: 'public', table: 'comments',
+                filter: `post_id=eq.${post.id}`
+            }, (payload) => {
+                setComments(prev => {
+                    if (prev.some(c => c.id === payload.new.id)) return prev;
+                    return [...prev, payload.new];
+                });
+                if (!payload.new.parent_id) setCommentCount(c => c + 1);
+            })
+            .on('postgres_changes', {
+                event: 'DELETE', schema: 'public', table: 'comments',
+                filter: `post_id=eq.${post.id}`
+            }, (payload) => {
+                const deleted = payload.old;
+                if (deleted?.id) {
+                    setComments(prev => prev.filter(c => c.id !== deleted.id && c.parent_id !== deleted.id));
+                    if (!deleted.parent_id) setCommentCount(c => Math.max(0, c - 1));
+                }
+            })
+            .on('postgres_changes', {
+                event: 'UPDATE', schema: 'public', table: 'comments',
+                filter: `post_id=eq.${post.id}`
+            }, (payload) => {
+                setComments(prev => prev.map(c =>
+                    c.id === payload.new.id ? { ...c, likes_count: payload.new.likes_count } : c
+                ));
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, [post.id]);
 
     return (
         <motion.div
