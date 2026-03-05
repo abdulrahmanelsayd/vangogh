@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import PageTransition from '../components/PageTransition';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,19 +10,46 @@ export default function Community() {
     const { user, loading: authLoading, signInWithGoogle, signOut } = useAuth();
     const [posts, setPosts] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [showUpload, setShowUpload] = useState(false);
 
-    /* ── Fetch Posts ── */
-    const fetchPosts = useCallback(async () => {
-        setLoading(true);
+    // Pagination refs (useRef avoids dependency loops in effects)
+    const pageRef = useRef(0);
+    const hasMoreRef = useRef(true);
+    const loadingMoreRef = useRef(false);
+    const observerTarget = useRef(null);
+
+    /* ── Fetch Posts (Initial & Pagination) ── */
+    const fetchPosts = useCallback(async (reset = false) => {
+        if (!reset && (!hasMoreRef.current || loadingMoreRef.current)) return;
+
+        const currentPage = reset ? 0 : pageRef.current;
+        if (reset) {
+            setLoading(true);
+            hasMoreRef.current = true;
+        } else {
+            loadingMoreRef.current = true;
+            setIsLoadingMore(true);
+        }
+
+        const start = currentPage * 10;
+        const end = start + 9; // Fetch 10 posts
+
         const { data, error } = await supabase
             .from('posts').select('*')
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false })
+            .range(start, end);
 
-        if (error) { console.error('Fetch error:', error); setLoading(false); return; }
+        if (error) {
+            console.error('Fetch error:', error);
+            if (reset) setLoading(false);
+            else { loadingMoreRef.current = false; setIsLoadingMore(false); }
+            return;
+        }
 
         if (data?.length) {
-            const { data: commentCounts } = await supabase.from('comments').select('post_id').is('parent_id', null);
+            const postIds = data.map(p => p.id);
+            const { data: commentCounts } = await supabase.from('comments').select('post_id').is('parent_id', null).in('post_id', postIds);
             const countMap = {};
             (commentCounts || []).forEach(c => { countMap[c.post_id] = (countMap[c.post_id] || 0) + 1; });
             data.forEach(p => p.comment_count = countMap[p.id] || 0);
@@ -30,17 +57,45 @@ export default function Community() {
             if (user) {
                 const { data: userLikes } = await supabase
                     .from('likes').select('post_id')
-                    .eq('user_id', user.id);
+                    .eq('user_id', user.id).in('post_id', postIds);
                 const likedSet = new Set((userLikes || []).map(l => l.post_id));
                 data.forEach(p => p.user_liked = likedSet.has(p.id));
             }
         }
 
-        setPosts(data || []);
+        hasMoreRef.current = data?.length === 10;
+
+        setPosts(prev => {
+            if (reset) return data || [];
+            // Prevent duplicates (e.g., if realtime inserted it)
+            const existingIds = new Set(prev.map(p => p.id));
+            const newPosts = (data || []).filter(p => !existingIds.has(p.id));
+            return [...prev, ...newPosts];
+        });
+
+        pageRef.current = currentPage + 1;
         setLoading(false);
+        loadingMoreRef.current = false;
+        setIsLoadingMore(false);
     }, [user]);
 
-    useEffect(() => { fetchPosts(); }, [fetchPosts]);
+    // Initial load when user changes
+    useEffect(() => { fetchPosts(true); }, [fetchPosts]);
+
+    // Intersection Observer for Infinite Scroll
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            entries => {
+                if (entries[0].isIntersecting) {
+                    fetchPosts(false);
+                }
+            },
+            { threshold: 0.1, rootMargin: '200px' } // Trigger 200px before bottom
+        );
+
+        if (observerTarget.current) observer.observe(observerTarget.current);
+        return () => observer.disconnect();
+    }, [fetchPosts]);
 
     /* ── Realtime: live posts feed ── */
     useEffect(() => {
@@ -181,18 +236,30 @@ export default function Community() {
                             <p className="sans" style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.2)', margin: 0 }}>Be the first to share your experience.</p>
                         </motion.div>
                     ) : (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 'clamp(1rem, 3vw, 1.5rem)' }}>
-                            <AnimatePresence mode="popLayout">
-                                {posts.map(post => (
-                                    <PostCard key={post.id} post={post} user={user} onLike={handleLike} onDelete={handleDelete} />
-                                ))}
-                            </AnimatePresence>
-                        </div>
+                        <>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 'clamp(1rem, 3vw, 1.5rem)' }}>
+                                <AnimatePresence mode="popLayout">
+                                    {posts.map(post => (
+                                        <PostCard key={post.id} post={post} user={user} onLike={handleLike} onDelete={handleDelete} />
+                                    ))}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* Infinite Scroll Observer Target */}
+                            <div ref={observerTarget} style={{ padding: '3rem 0', textAlign: 'center', height: '60px' }}>
+                                {isLoadingMore && (
+                                    <motion.p animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 1.5, repeat: Infinity }}
+                                        className="sans" style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', letterSpacing: '2px' }}>
+                                        Loading more...
+                                    </motion.p>
+                                )}
+                            </div>
+                        </>
                     )}
                 </div>
 
                 <AnimatePresence>
-                    {showUpload && <UploadModal onClose={() => setShowUpload(false)} onUploaded={fetchPosts} />}
+                    {showUpload && <UploadModal onClose={() => setShowUpload(false)} onUploaded={() => fetchPosts(true)} />}
                 </AnimatePresence>
             </div>
         </PageTransition>
