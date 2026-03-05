@@ -178,6 +178,13 @@ function PostCard({ post, user, onLike, onDelete }) {
     const [liked, setLiked] = useState(post.user_liked);
     const [count, setCount] = useState(post.likes_count);
     const [imgLoaded, setImgLoaded] = useState(false);
+    const [showComments, setShowComments] = useState(false);
+    const [comments, setComments] = useState([]);
+    const [commentCount, setCommentCount] = useState(post.comment_count || 0);
+    const [newComment, setNewComment] = useState('');
+    const [loadingComments, setLoadingComments] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const commentInputRef = useRef(null);
 
     const handleLike = async () => {
         if (!user) return;
@@ -185,6 +192,53 @@ function PostCard({ post, user, onLike, onDelete }) {
         setLiked(newLiked);
         setCount(c => c + (newLiked ? 1 : -1));
         await onLike(post.id, newLiked);
+    };
+
+    const fetchComments = async () => {
+        setLoadingComments(true);
+        const { data } = await supabase
+            .from('comments')
+            .select('*')
+            .eq('post_id', post.id)
+            .order('created_at', { ascending: true });
+        setComments(data || []);
+        setLoadingComments(false);
+    };
+
+    const toggleComments = () => {
+        const next = !showComments;
+        setShowComments(next);
+        if (next && comments.length === 0) fetchComments();
+        if (next) setTimeout(() => commentInputRef.current?.focus(), 200);
+    };
+
+    const handleSubmitComment = async () => {
+        if (!user || !newComment.trim() || submitting) return;
+        setSubmitting(true);
+        const commentData = {
+            post_id: post.id,
+            user_id: user.id,
+            user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Visitor',
+            user_avatar: user.user_metadata?.avatar_url || null,
+            content: newComment.trim()
+        };
+        const { data, error } = await supabase.from('comments').insert(commentData).select().single();
+        if (!error && data) {
+            setComments(prev => [...prev, data]);
+            setCommentCount(c => c + 1);
+            setNewComment('');
+        }
+        setSubmitting(false);
+    };
+
+    const handleDeleteComment = async (commentId) => {
+        await supabase.from('comments').delete().eq('id', commentId);
+        setComments(prev => prev.filter(c => c.id !== commentId));
+        setCommentCount(c => Math.max(0, c - 1));
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(); }
     };
 
     const timeAgo = (date) => {
@@ -250,7 +304,8 @@ function PostCard({ post, user, onLike, onDelete }) {
                 )}
 
                 {/* Actions */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {/* Like */}
                     <button
                         onClick={handleLike}
                         aria-label={liked ? 'Unlike' : 'Like'}
@@ -268,7 +323,24 @@ function PostCard({ post, user, onLike, onDelete }) {
                         <span className="sans" style={{ fontSize: '0.7rem', color: liked ? '#ef4444' : 'rgba(255,255,255,0.3)', fontWeight: 500 }}>{count}</span>
                     </button>
 
-                    {/* Delete button (only for own posts) */}
+                    {/* Comment toggle */}
+                    <button
+                        onClick={toggleComments}
+                        aria-label="Comments"
+                        style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '4px 0',
+                            color: showComments ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.35)',
+                            transition: 'color 0.3s ease'
+                        }}
+                    >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        </svg>
+                        <span className="sans" style={{ fontSize: '0.7rem', fontWeight: 500 }}>{commentCount}</span>
+                    </button>
+
+                    {/* Delete post */}
                     {user && user.id === post.user_id && (
                         <button
                             onClick={() => onDelete(post.id)}
@@ -287,6 +359,106 @@ function PostCard({ post, user, onLike, onDelete }) {
                         </button>
                     )}
                 </div>
+
+                {/* ─── Comments Section ─── */}
+                <AnimatePresence>
+                    {showComments && (
+                        <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                            style={{ overflow: 'hidden' }}
+                        >
+                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
+                                {/* Comment list */}
+                                {loadingComments ? (
+                                    <p className="sans" style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.2)', textAlign: 'center', padding: '0.5rem 0' }}>Loading...</p>
+                                ) : comments.length === 0 ? (
+                                    <p className="sans" style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.2)', textAlign: 'center', padding: '0.5rem 0' }}>No comments yet</p>
+                                ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px', marginBottom: '0.6rem' }}>
+                                        {comments.map(c => (
+                                            <motion.div
+                                                key={c.id}
+                                                initial={{ opacity: 0, y: 8 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                transition={{ duration: 0.3 }}
+                                                style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', group: 'comment' }}
+                                            >
+                                                {c.user_avatar ? (
+                                                    <img src={c.user_avatar} alt="" style={{ width: '20px', height: '20px', borderRadius: '50%', flexShrink: 0, marginTop: '2px' }} />
+                                                ) : (
+                                                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.08)', flexShrink: 0, marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.5rem', color: 'rgba(255,255,255,0.3)' }}>
+                                                        {c.user_name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                )}
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
+                                                        <span className="sans" style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.55)', fontWeight: 600 }}>{c.user_name}</span>
+                                                        <span className="sans" style={{ fontSize: '0.58rem', color: 'rgba(255,255,255,0.15)' }}>{timeAgo(c.created_at)}</span>
+                                                        {user && user.id === c.user_id && (
+                                                            <button
+                                                                onClick={() => handleDeleteComment(c.id)}
+                                                                aria-label="Delete comment"
+                                                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.1)', fontSize: '0.6rem', padding: '0 2px', marginLeft: 'auto', transition: 'color 0.2s ease' }}
+                                                                onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,100,100,0.5)'}
+                                                                onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.1)'}
+                                                            >×</button>
+                                                        )}
+                                                    </div>
+                                                    <p className="sans" style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.45)', lineHeight: 1.5, margin: '0.15rem 0 0 0', fontWeight: 300, wordBreak: 'break-word' }}>{c.content}</p>
+                                                </div>
+                                            </motion.div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Comment input */}
+                                {user ? (
+                                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                        <input
+                                            ref={commentInputRef}
+                                            type="text"
+                                            value={newComment}
+                                            onChange={e => setNewComment(e.target.value)}
+                                            onKeyDown={handleKeyDown}
+                                            placeholder="Add a comment..."
+                                            maxLength={500}
+                                            className="sans"
+                                            style={{
+                                                flex: 1, background: 'rgba(255,255,255,0.04)',
+                                                border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px',
+                                                padding: '0.5rem 0.7rem', color: '#ffffff', fontSize: '0.72rem',
+                                                outline: 'none', fontFamily: 'inherit', letterSpacing: '0.2px',
+                                                transition: 'border-color 0.3s ease'
+                                            }}
+                                            onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
+                                            onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.06)'}
+                                        />
+                                        <button
+                                            onClick={handleSubmitComment}
+                                            disabled={!newComment.trim() || submitting}
+                                            className="sans"
+                                            style={{
+                                                background: newComment.trim() ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.06)',
+                                                color: newComment.trim() ? '#000' : 'rgba(255,255,255,0.2)',
+                                                border: 'none', borderRadius: '8px',
+                                                padding: '0.5rem 0.8rem', cursor: newComment.trim() ? 'pointer' : 'default',
+                                                fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '1.5px',
+                                                fontWeight: 600, transition: 'all 0.3s ease', flexShrink: 0
+                                            }}
+                                        >
+                                            {submitting ? '...' : 'Post'}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <p className="sans" style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', textAlign: 'center', margin: '0.3rem 0 0 0' }}>Sign in to comment</p>
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
         </motion.div>
     );
@@ -308,15 +480,26 @@ export default function Community() {
 
         if (error) { console.error('Fetch error:', error); setLoading(false); return; }
 
-        // Check which posts the user has liked
-        if (user && data.length > 0) {
-            const { data: userLikes } = await supabase
-                .from('likes')
-                .select('post_id')
-                .eq('user_id', user.id);
+        if (data && data.length > 0) {
+            // Get comment counts
+            const { data: commentCounts } = await supabase
+                .from('comments')
+                .select('post_id');
 
-            const likedSet = new Set((userLikes || []).map(l => l.post_id));
-            data.forEach(p => p.user_liked = likedSet.has(p.id));
+            const countMap = {};
+            (commentCounts || []).forEach(c => { countMap[c.post_id] = (countMap[c.post_id] || 0) + 1; });
+            data.forEach(p => p.comment_count = countMap[p.id] || 0);
+
+            // Check which posts the user has liked
+            if (user) {
+                const { data: userLikes } = await supabase
+                    .from('likes')
+                    .select('post_id')
+                    .eq('user_id', user.id);
+
+                const likedSet = new Set((userLikes || []).map(l => l.post_id));
+                data.forEach(p => p.user_liked = likedSet.has(p.id));
+            }
         }
 
         setPosts(data || []);
