@@ -5,6 +5,7 @@ import PageTransition from '../components/PageTransition';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import PostCard from '../components/community/PostCard';
+import EditProfileModal from '../components/community/EditProfileModal';
 
 export default function Profile() {
     const { id } = useParams();
@@ -15,6 +16,7 @@ export default function Profile() {
     const [posts, setPosts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
 
     // Pagination refs
     const pageRef = useRef(0);
@@ -51,13 +53,34 @@ export default function Profile() {
             return;
         }
 
-        if (reset && data?.length > 0) {
-            // Extact user info from their most recent post
-            setProfileUser({
-                id: data[0].user_id,
-                name: data[0].user_name,
-                avatar: data[0].user_avatar
-            });
+        if (reset) {
+            // 1. Try to fetch from proper profiles table (gets bio)
+            const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', id).single();
+
+            if (profileRow) {
+                setProfileUser({
+                    id: profileRow.id,
+                    name: profileRow.full_name,
+                    avatar: profileRow.avatar_url,
+                    bio: profileRow.bio
+                });
+            } else if (id === user?.id) {
+                // 2. Fallback to auth context if viewing own profile but no row exists yet
+                setProfileUser({
+                    id: user.id,
+                    name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Visitor',
+                    avatar: user.user_metadata?.avatar_url,
+                    bio: ''
+                });
+            } else if (data?.length > 0) {
+                // 3. Fallback to post metadata for backwards compatibility
+                setProfileUser({
+                    id: data[0].user_id,
+                    name: data[0].user_name,
+                    avatar: data[0].user_avatar,
+                    bio: ''
+                });
+            }
         }
 
         if (data?.length) {
@@ -176,10 +199,28 @@ export default function Profile() {
                                 </div>
                             )}
 
-                            <div>
-                                <h1 className="serif" style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', fontWeight: 300, letterSpacing: '1px', margin: '0 0 0.5rem 0' }}>
-                                    {profileUser.name}
-                                </h1>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                                    <h1 className="serif" style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', fontWeight: 300, letterSpacing: '1px', margin: 0 }}>
+                                        {profileUser.name}
+                                    </h1>
+                                    {user && user.id === profileUser.id && (
+                                        <button onClick={() => setIsEditing(true)} aria-label="Edit Profile"
+                                            className="sans" style={{ background: 'transparent', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50px', padding: '6px 14px', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '2px', transition: 'all 0.3s ease' }}
+                                            onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.5)'; }}
+                                            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
+                                        >
+                                            Edit
+                                        </button>
+                                    )}
+                                </div>
+
+                                {profileUser.bio && (
+                                    <p className="sans" style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)', margin: '0 0 1rem 0', lineHeight: 1.6, maxWidth: '600px' }}>
+                                        {profileUser.bio}
+                                    </p>
+                                )}
+
                                 <p className="sans" style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.4)', margin: 0, letterSpacing: '1px', textTransform: 'uppercase' }}>
                                     {posts.length === 0 ? 'No posts yet' : `${posts.length > 0 && !hasMoreRef.current ? posts.length : posts.length + '+'} Posts Shared`}
                                 </p>
@@ -229,6 +270,14 @@ export default function Profile() {
                     )}
                 </div>
             </div>
+
+            <EditProfileModal
+                isOpen={isEditing}
+                onClose={() => setIsEditing(false)}
+                user={user}
+                currentProfile={profileUser}
+                onUpdate={(newProfile) => setProfileUser(prev => ({ ...prev, name: newProfile.full_name, bio: newProfile.bio, avatar: newProfile.avatar_url }))}
+            />
         </PageTransition>
     );
 }
