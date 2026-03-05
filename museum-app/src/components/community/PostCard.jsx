@@ -214,11 +214,23 @@ export default function PostCard({ post, user, onLike, onDelete }) {
             onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'}
             onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'}
         >
-            {/* Image */}
+            {/* Media */}
             <div style={{ position: 'relative', backgroundColor: 'rgba(255,255,255,0.03)', minHeight: '200px' }}>
-                <img src={post.image_url} alt={post.caption || 'Community photo'} loading="lazy"
-                    onLoad={() => setImgLoaded(true)}
-                    style={{ width: '100%', display: 'block', opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.5s ease' }} />
+                {post.media_type === 'video' ? (
+                    <video
+                        src={post.image_url}
+                        controls
+                        playsInline
+                        loop
+                        preload="metadata"
+                        style={{ width: '100%', display: 'block', maxHeight: '500px', objectFit: 'cover' }}
+                        onLoadedData={() => setImgLoaded(true)}
+                    />
+                ) : (
+                    <img src={post.image_url} alt={post.caption || 'Community photo'} loading="lazy"
+                        onLoad={() => setImgLoaded(true)}
+                        style={{ width: '100%', display: 'block', opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.5s ease' }} />
+                )}
             </div>
 
             <div style={{ padding: 'clamp(0.8rem, 2vw, 1.2rem)' }}>

@@ -4,10 +4,21 @@ import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { compressImage, formatBytes } from '../../utils/compressImage';
 
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime', 'video/mov'];
+const ACCEPTED_TYPES = [...IMAGE_TYPES, ...VIDEO_TYPES];
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024;  // 10MB
+const MAX_VIDEO_SIZE = 50 * 1024 * 1024;  // 50MB
+
+function getMediaType(file) {
+    return file.type.startsWith('video/') ? 'video' : 'image';
+}
+
 export default function UploadModal({ onClose, onUploaded }) {
     const { user } = useAuth();
     const [file, setFile] = useState(null);
     const [preview, setPreview] = useState(null);
+    const [mediaType, setMediaType] = useState('image');
     const [caption, setCaption] = useState('');
     const [uploading, setUploading] = useState(false);
     const [dragOver, setDragOver] = useState(false);
@@ -16,31 +27,55 @@ export default function UploadModal({ onClose, onUploaded }) {
     const inputRef = useRef(null);
 
     const handleFile = async (f) => {
-        if (!f || !f.type.startsWith('image/')) return;
-        if (f.size > 10 * 1024 * 1024) { alert('Image must be under 10MB'); return; }
+        if (!f) return;
 
-        // Show preview immediately from original
-        const reader = new FileReader();
-        reader.onload = (e) => setPreview(e.target.result);
-        reader.readAsDataURL(f);
+        // Validate type
+        if (!ACCEPTED_TYPES.some(t => f.type === t || f.type.startsWith(t.split('/')[0]))) {
+            alert('Unsupported file type. Use JPG, PNG, WebP, MP4, or WebM.');
+            return;
+        }
 
-        // Compress in background
-        setCompressing(true);
-        setCompressionInfo(null);
+        const type = getMediaType(f);
+        const maxSize = type === 'video' ? MAX_VIDEO_SIZE : MAX_IMAGE_SIZE;
 
-        const originalSize = f.size;
-        const { file: compressed, savedPercent } = await compressImage(f);
+        if (f.size > maxSize) {
+            alert(`File must be under ${formatBytes(maxSize)}`);
+            return;
+        }
 
-        setFile(compressed);
-        setCompressing(false);
-        setCompressionInfo({
-            originalSize,
-            compressedSize: compressed.size,
-            savedPercent
-        });
+        setMediaType(type);
+
+        // Generate preview
+        const url = URL.createObjectURL(f);
+        setPreview(url);
+
+        if (type === 'image') {
+            // Compress images
+            setCompressing(true);
+            setCompressionInfo(null);
+
+            const originalSize = f.size;
+            const { file: compressed, savedPercent } = await compressImage(f);
+
+            setFile(compressed);
+            setCompressing(false);
+            setCompressionInfo({ originalSize, compressedSize: compressed.size, savedPercent });
+        } else {
+            // Videos: no compression, just set directly
+            setFile(f);
+            setCompressionInfo({ originalSize: f.size, compressedSize: f.size, savedPercent: 0 });
+        }
     };
 
     const handleDrop = (e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); };
+
+    const clearFile = () => {
+        if (preview) URL.revokeObjectURL(preview);
+        setFile(null);
+        setPreview(null);
+        setCompressionInfo(null);
+        setMediaType('image');
+    };
 
     const handleSubmit = async () => {
         if (!file || !user || compressing) return;
@@ -58,7 +93,8 @@ export default function UploadModal({ onClose, onUploaded }) {
                 user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Visitor',
                 user_avatar: user.user_metadata?.avatar_url || null,
                 image_url: publicUrl,
-                caption: caption.trim()
+                caption: caption.trim(),
+                media_type: mediaType
             });
             if (insertErr) throw insertErr;
 
@@ -77,6 +113,11 @@ export default function UploadModal({ onClose, onUploaded }) {
         window.addEventListener('keydown', handleKey);
         return () => window.removeEventListener('keydown', handleKey);
     }, [onClose]);
+
+    // Cleanup blob URLs
+    useEffect(() => {
+        return () => { if (preview) URL.revokeObjectURL(preview); };
+    }, []);
 
     return (
         <motion.div
@@ -128,16 +169,27 @@ export default function UploadModal({ onClose, onUploaded }) {
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
                         </svg>
                         <p className="sans" style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.85rem', margin: 0, letterSpacing: '1px' }}>
-                            Drop an image or <span style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'underline' }}>browse</span>
+                            Drop a photo or video, or <span style={{ color: 'rgba(255,255,255,0.7)', textDecoration: 'underline' }}>browse</span>
                         </p>
-                        <p className="sans" style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.7rem', margin: '0.5rem 0 0 0' }}>Max 10MB • JPG, PNG, WebP</p>
-                        <input ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+                        <p className="sans" style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.7rem', margin: '0.5rem 0 0 0' }}>Images up to 10MB • Videos up to 50MB</p>
+                        <input ref={inputRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
                     </div>
                 ) : (
                     <div style={{ position: 'relative', borderRadius: '14px', overflow: 'hidden', marginBottom: '0.5rem' }}>
-                        <img src={preview} alt="Preview" style={{ width: '100%', maxHeight: '280px', objectFit: 'cover', display: 'block' }} />
+                        {mediaType === 'video' ? (
+                            <video
+                                src={preview}
+                                controls
+                                playsInline
+                                muted
+                                style={{ width: '100%', maxHeight: '280px', objectFit: 'cover', display: 'block', borderRadius: '14px', background: '#000' }}
+                            />
+                        ) : (
+                            <img src={preview} alt="Preview" style={{ width: '100%', maxHeight: '280px', objectFit: 'cover', display: 'block' }} />
+                        )}
+
                         <button
-                            onClick={() => { setFile(null); setPreview(null); setCompressionInfo(null); }}
+                            onClick={clearFile}
                             style={{
                                 position: 'absolute', top: '0.75rem', right: '0.75rem',
                                 background: 'rgba(0,0,0,0.7)', border: 'none', color: '#fff',
@@ -146,7 +198,28 @@ export default function UploadModal({ onClose, onUploaded }) {
                             }}
                         >×</button>
 
-                        {/* Compression indicator overlay */}
+                        {/* Media type badge */}
+                        <div style={{
+                            position: 'absolute', top: '0.75rem', left: '0.75rem',
+                            background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+                            borderRadius: '6px', padding: '0.25rem 0.5rem',
+                            display: 'flex', alignItems: 'center', gap: '0.3rem'
+                        }}>
+                            {mediaType === 'video' ? (
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)" stroke="none">
+                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                </svg>
+                            ) : (
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
+                                </svg>
+                            )}
+                            <span className="sans" style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                                {mediaType}
+                            </span>
+                        </div>
+
+                        {/* Compression spinner (images only) */}
                         <AnimatePresence>
                             {compressing && (
                                 <motion.div
@@ -170,7 +243,7 @@ export default function UploadModal({ onClose, onUploaded }) {
                     </div>
                 )}
 
-                {/* Compression stats badge */}
+                {/* Compression / file size stats */}
                 <AnimatePresence>
                     {compressionInfo && !compressing && (
                         <motion.div
@@ -196,7 +269,7 @@ export default function UploadModal({ onClose, onUploaded }) {
                                 </>
                             ) : (
                                 <span className="sans" style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.5px' }}>
-                                    {formatBytes(compressionInfo.originalSize)} — already optimal
+                                    {formatBytes(compressionInfo.originalSize)}{mediaType === 'video' ? ' — video ready' : ' — already optimal'}
                                 </span>
                             )}
                         </motion.div>
