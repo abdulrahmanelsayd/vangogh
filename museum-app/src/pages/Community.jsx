@@ -180,8 +180,10 @@ function PostCard({ post, user, onLike, onDelete }) {
     const [imgLoaded, setImgLoaded] = useState(false);
     const [showComments, setShowComments] = useState(false);
     const [comments, setComments] = useState([]);
+    const [commentLikes, setCommentLikes] = useState({});
     const [commentCount, setCommentCount] = useState(post.comment_count || 0);
     const [newComment, setNewComment] = useState('');
+    const [replyTo, setReplyTo] = useState(null);
     const [loadingComments, setLoadingComments] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const commentInputRef = useRef(null);
@@ -202,6 +204,17 @@ function PostCard({ post, user, onLike, onDelete }) {
             .eq('post_id', post.id)
             .order('created_at', { ascending: true });
         setComments(data || []);
+
+        // Fetch user's comment likes
+        if (user && data && data.length > 0) {
+            const { data: myLikes } = await supabase
+                .from('comment_likes')
+                .select('comment_id')
+                .eq('user_id', user.id);
+            const likedMap = {};
+            (myLikes || []).forEach(l => { likedMap[l.comment_id] = true; });
+            setCommentLikes(likedMap);
+        }
         setLoadingComments(false);
     };
 
@@ -220,25 +233,52 @@ function PostCard({ post, user, onLike, onDelete }) {
             user_id: user.id,
             user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Visitor',
             user_avatar: user.user_metadata?.avatar_url || null,
-            content: newComment.trim()
+            content: newComment.trim(),
+            parent_id: replyTo || null
         };
         const { data, error } = await supabase.from('comments').insert(commentData).select().single();
         if (!error && data) {
             setComments(prev => [...prev, data]);
             setCommentCount(c => c + 1);
             setNewComment('');
+            setReplyTo(null);
         }
         setSubmitting(false);
     };
 
+    const handleCommentLike = async (commentId) => {
+        if (!user) return;
+        const isLiked = commentLikes[commentId];
+        setCommentLikes(prev => ({ ...prev, [commentId]: !isLiked }));
+        setComments(prev => prev.map(c => c.id === commentId ? { ...c, likes_count: (c.likes_count || 0) + (isLiked ? -1 : 1) } : c));
+
+        if (isLiked) {
+            await supabase.from('comment_likes').delete().eq('user_id', user.id).eq('comment_id', commentId);
+            await supabase.from('comments').update({ likes_count: Math.max(0, comments.find(c => c.id === commentId).likes_count - 1) }).eq('id', commentId);
+        } else {
+            await supabase.from('comment_likes').insert({ user_id: user.id, comment_id: commentId });
+            await supabase.from('comments').update({ likes_count: (comments.find(c => c.id === commentId).likes_count || 0) + 1 }).eq('id', commentId);
+        }
+    };
+
     const handleDeleteComment = async (commentId) => {
+        // Also delete replies to this comment
+        const replyIds = comments.filter(c => c.parent_id === commentId).map(c => c.id);
+        const deleteCount = 1 + replyIds.length;
         await supabase.from('comments').delete().eq('id', commentId);
-        setComments(prev => prev.filter(c => c.id !== commentId));
-        setCommentCount(c => Math.max(0, c - 1));
+        setComments(prev => prev.filter(c => c.id !== commentId && c.parent_id !== commentId));
+        setCommentCount(c => Math.max(0, c - deleteCount));
+    };
+
+    const handleReply = (comment) => {
+        setReplyTo(comment.id);
+        setNewComment(`@${comment.user_name} `);
+        setTimeout(() => commentInputRef.current?.focus(), 100);
     };
 
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(); }
+        if (e.key === 'Escape') { setReplyTo(null); setNewComment(''); }
     };
 
     const timeAgo = (date) => {
@@ -249,6 +289,72 @@ function PostCard({ post, user, onLike, onDelete }) {
         if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`;
         return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     };
+
+    // Group comments: top-level and replies
+    const topLevel = comments.filter(c => !c.parent_id);
+    const replies = comments.filter(c => c.parent_id);
+    const getReplies = (parentId) => replies.filter(r => r.parent_id === parentId);
+
+    const renderComment = (c, isReply = false) => (
+        <motion.div
+            key={c.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', paddingLeft: isReply ? '1.5rem' : 0 }}
+        >
+            {c.user_avatar ? (
+                <img src={c.user_avatar} alt="" style={{ width: isReply ? '18px' : '20px', height: isReply ? '18px' : '20px', borderRadius: '50%', flexShrink: 0, marginTop: '2px' }} />
+            ) : (
+                <div style={{ width: isReply ? '18px' : '20px', height: isReply ? '18px' : '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.08)', flexShrink: 0, marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.45rem', color: 'rgba(255,255,255,0.3)' }}>
+                    {c.user_name.charAt(0).toUpperCase()}
+                </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <span className="sans" style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.55)', fontWeight: 600 }}>{c.user_name}</span>
+                    <span className="sans" style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.15)' }}>{timeAgo(c.created_at)}</span>
+                </div>
+                <p className="sans" style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.45)', lineHeight: 1.5, margin: '0.15rem 0 0.3rem 0', fontWeight: 300, wordBreak: 'break-word' }}>{c.content}</p>
+
+                {/* Comment actions: like, reply, delete */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+                    {/* Like comment */}
+                    <button
+                        onClick={() => handleCommentLike(c.id)}
+                        style={{ background: 'none', border: 'none', cursor: user ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: '0.2rem', padding: 0 }}
+                    >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill={commentLikes[c.id] ? '#ef4444' : 'none'} stroke={commentLikes[c.id] ? '#ef4444' : 'rgba(255,255,255,0.2)'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                        </svg>
+                        {(c.likes_count || 0) > 0 && <span className="sans" style={{ fontSize: '0.58rem', color: commentLikes[c.id] ? '#ef4444' : 'rgba(255,255,255,0.2)', fontWeight: 500 }}>{c.likes_count}</span>}
+                    </button>
+
+                    {/* Reply button */}
+                    {user && !isReply && (
+                        <button
+                            onClick={() => handleReply(c)}
+                            className="sans"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.58rem', color: 'rgba(255,255,255,0.2)', padding: 0, letterSpacing: '0.5px', transition: 'color 0.2s ease' }}
+                            onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
+                            onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.2)'}
+                        >Reply</button>
+                    )}
+
+                    {/* Delete */}
+                    {user && user.id === c.user_id && (
+                        <button
+                            onClick={() => handleDeleteComment(c.id)}
+                            aria-label="Delete comment"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.1)', fontSize: '0.55rem', padding: 0, transition: 'color 0.2s ease' }}
+                            onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,100,100,0.5)'}
+                            onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.1)'}
+                        >×</button>
+                    )}
+                </div>
+            </div>
+        </motion.div>
+    );
 
     return (
         <motion.div
@@ -305,15 +411,8 @@ function PostCard({ post, user, onLike, onDelete }) {
 
                 {/* Actions */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    {/* Like */}
-                    <button
-                        onClick={handleLike}
-                        aria-label={liked ? 'Unlike' : 'Like'}
-                        style={{
-                            background: 'none', border: 'none', cursor: user ? 'pointer' : 'default',
-                            display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '4px 0',
-                            transition: 'transform 0.2s ease'
-                        }}
+                    <button onClick={handleLike} aria-label={liked ? 'Unlike' : 'Like'}
+                        style={{ background: 'none', border: 'none', cursor: user ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '4px 0', transition: 'transform 0.2s ease' }}
                         onMouseDown={e => { if (user) e.currentTarget.style.transform = 'scale(0.9)'; }}
                         onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
                     >
@@ -323,16 +422,8 @@ function PostCard({ post, user, onLike, onDelete }) {
                         <span className="sans" style={{ fontSize: '0.7rem', color: liked ? '#ef4444' : 'rgba(255,255,255,0.3)', fontWeight: 500 }}>{count}</span>
                     </button>
 
-                    {/* Comment toggle */}
-                    <button
-                        onClick={toggleComments}
-                        aria-label="Comments"
-                        style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '4px 0',
-                            color: showComments ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.35)',
-                            transition: 'color 0.3s ease'
-                        }}
+                    <button onClick={toggleComments} aria-label="Comments"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '4px 0', color: showComments ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.35)', transition: 'color 0.3s ease' }}
                     >
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -340,16 +431,9 @@ function PostCard({ post, user, onLike, onDelete }) {
                         <span className="sans" style={{ fontSize: '0.7rem', fontWeight: 500 }}>{commentCount}</span>
                     </button>
 
-                    {/* Delete post */}
                     {user && user.id === post.user_id && (
-                        <button
-                            onClick={() => onDelete(post.id)}
-                            aria-label="Delete post"
-                            style={{
-                                background: 'none', border: 'none', cursor: 'pointer',
-                                marginLeft: 'auto', padding: '4px',
-                                color: 'rgba(255,255,255,0.15)', transition: 'color 0.3s ease'
-                            }}
+                        <button onClick={() => onDelete(post.id)} aria-label="Delete post"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', marginLeft: 'auto', padding: '4px', color: 'rgba(255,255,255,0.15)', transition: 'color 0.3s ease' }}
                             onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,100,100,0.6)'}
                             onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.15)'}
                         >
@@ -371,50 +455,32 @@ function PostCard({ post, user, onLike, onDelete }) {
                             style={{ overflow: 'hidden' }}
                         >
                             <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
-                                {/* Comment list */}
                                 {loadingComments ? (
                                     <p className="sans" style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.2)', textAlign: 'center', padding: '0.5rem 0' }}>Loading...</p>
                                 ) : comments.length === 0 ? (
                                     <p className="sans" style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.2)', textAlign: 'center', padding: '0.5rem 0' }}>No comments yet</p>
                                 ) : (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px', marginBottom: '0.6rem' }}>
-                                        {comments.map(c => (
-                                            <motion.div
-                                                key={c.id}
-                                                initial={{ opacity: 0, y: 8 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                transition={{ duration: 0.3 }}
-                                                style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', group: 'comment' }}
-                                            >
-                                                {c.user_avatar ? (
-                                                    <img src={c.user_avatar} alt="" style={{ width: '20px', height: '20px', borderRadius: '50%', flexShrink: 0, marginTop: '2px' }} />
-                                                ) : (
-                                                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.08)', flexShrink: 0, marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.5rem', color: 'rgba(255,255,255,0.3)' }}>
-                                                        {c.user_name.charAt(0).toUpperCase()}
-                                                    </div>
-                                                )}
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
-                                                        <span className="sans" style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.55)', fontWeight: 600 }}>{c.user_name}</span>
-                                                        <span className="sans" style={{ fontSize: '0.58rem', color: 'rgba(255,255,255,0.15)' }}>{timeAgo(c.created_at)}</span>
-                                                        {user && user.id === c.user_id && (
-                                                            <button
-                                                                onClick={() => handleDeleteComment(c.id)}
-                                                                aria-label="Delete comment"
-                                                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.1)', fontSize: '0.6rem', padding: '0 2px', marginLeft: 'auto', transition: 'color 0.2s ease' }}
-                                                                onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,100,100,0.5)'}
-                                                                onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.1)'}
-                                                            >×</button>
-                                                        )}
-                                                    </div>
-                                                    <p className="sans" style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.45)', lineHeight: 1.5, margin: '0.15rem 0 0 0', fontWeight: 300, wordBreak: 'break-word' }}>{c.content}</p>
-                                                </div>
-                                            </motion.div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: '280px', overflowY: 'auto', paddingRight: '4px', marginBottom: '0.6rem' }}>
+                                        {topLevel.map(c => (
+                                            <React.Fragment key={c.id}>
+                                                {renderComment(c, false)}
+                                                {getReplies(c.id).map(r => renderComment(r, true))}
+                                            </React.Fragment>
                                         ))}
                                     </div>
                                 )}
 
-                                {/* Comment input */}
+                                {replyTo && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+                                        <span className="sans" style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.3)' }}>
+                                            Replying to {comments.find(c => c.id === replyTo)?.user_name || '...'}
+                                        </span>
+                                        <button onClick={() => { setReplyTo(null); setNewComment(''); }}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', fontSize: '0.6rem', padding: '0 2px' }}
+                                        >×</button>
+                                    </div>
+                                )}
+
                                 {user ? (
                                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                                         <input
@@ -423,18 +489,18 @@ function PostCard({ post, user, onLike, onDelete }) {
                                             value={newComment}
                                             onChange={e => setNewComment(e.target.value)}
                                             onKeyDown={handleKeyDown}
-                                            placeholder="Add a comment..."
+                                            placeholder={replyTo ? 'Write a reply...' : 'Add a comment...'}
                                             maxLength={500}
                                             className="sans"
                                             style={{
                                                 flex: 1, background: 'rgba(255,255,255,0.04)',
-                                                border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px',
-                                                padding: '0.5rem 0.7rem', color: '#ffffff', fontSize: '0.72rem',
-                                                outline: 'none', fontFamily: 'inherit', letterSpacing: '0.2px',
-                                                transition: 'border-color 0.3s ease'
+                                                border: `1px solid ${replyTo ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)'}`,
+                                                borderRadius: '8px', padding: '0.5rem 0.7rem', color: '#ffffff',
+                                                fontSize: '0.72rem', outline: 'none', fontFamily: 'inherit',
+                                                letterSpacing: '0.2px', transition: 'border-color 0.3s ease'
                                             }}
                                             onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
-                                            onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.06)'}
+                                            onBlur={e => e.target.style.borderColor = replyTo ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)'}
                                         />
                                         <button
                                             onClick={handleSubmitComment}
@@ -449,7 +515,7 @@ function PostCard({ post, user, onLike, onDelete }) {
                                                 fontWeight: 600, transition: 'all 0.3s ease', flexShrink: 0
                                             }}
                                         >
-                                            {submitting ? '...' : 'Post'}
+                                            {submitting ? '...' : replyTo ? 'Reply' : 'Post'}
                                         </button>
                                     </div>
                                 ) : (
