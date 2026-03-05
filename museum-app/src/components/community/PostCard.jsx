@@ -123,7 +123,7 @@ export default function PostCard({ post, user, onLike, onDelete }) {
         const { data, error } = await supabase.from('comments').insert(payload).select().single();
         if (!error && data) {
             setComments(prev => [...prev, data]);
-            setCommentCount(c => c + 1);
+            if (!replyTo) setCommentCount(c => c + 1);
             setNewComment('');
             setReplyTo(null);
         }
@@ -145,10 +145,12 @@ export default function PostCard({ post, user, onLike, onDelete }) {
     };
 
     const deleteComment = async (id) => {
-        const repliesCount = comments.filter(c => c.parent_id === id).length;
+        const target = comments.find(c => c.id === id);
+        const isTopLevel = !target?.parent_id;
+        const repliesCount = isTopLevel ? comments.filter(c => c.parent_id === id).length : 0;
         await supabase.from('comments').delete().eq('id', id);
         setComments(prev => prev.filter(c => c.id !== id && c.parent_id !== id));
-        setCommentCount(c => Math.max(0, c - 1 - repliesCount));
+        if (isTopLevel) setCommentCount(c => Math.max(0, c - 1));
     };
 
     const startReply = (comment) => {

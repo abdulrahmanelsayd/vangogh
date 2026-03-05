@@ -22,7 +22,7 @@ export default function Community() {
         if (error) { console.error('Fetch error:', error); setLoading(false); return; }
 
         if (data?.length) {
-            const { data: commentCounts } = await supabase.from('comments').select('post_id');
+            const { data: commentCounts } = await supabase.from('comments').select('post_id').is('parent_id', null);
             const countMap = {};
             (commentCounts || []).forEach(c => { countMap[c.post_id] = (countMap[c.post_id] || 0) + 1; });
             data.forEach(p => p.comment_count = countMap[p.id] || 0);
