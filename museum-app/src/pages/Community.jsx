@@ -181,7 +181,11 @@ export default function Community() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                             {authLoading ? null : user ? (
                                 <>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', transition: 'opacity 0.2s ease' }}
+                                        onClick={() => window.location.href = `/profile/${user.id}`}
+                                        onMouseEnter={e => e.currentTarget.style.opacity = 0.8}
+                                        onMouseLeave={e => e.currentTarget.style.opacity = 1}
+                                    >
                                         {user.user_metadata?.avatar_url && (
                                             <img src={user.user_metadata.avatar_url} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%' }} />
                                         )}
@@ -189,6 +193,11 @@ export default function Community() {
                                             {user.user_metadata?.full_name || user.email?.split('@')[0]}
                                         </span>
                                     </div>
+                                    <button onClick={() => window.location.href = `/profile/${user.id}`} className="sans"
+                                        style={{ background: 'transparent', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '50px', padding: '10px 18px', cursor: 'pointer', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '2px', transition: 'all 0.3s ease' }}
+                                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'; e.currentTarget.style.color = '#fff'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; e.currentTarget.style.color = 'rgba(255,255,255,0.6)'; }}
+                                    >My Profile</button>
                                     <button onClick={() => setShowUpload(true)} className="sans"
                                         style={{ background: '#ffffff', color: '#000000', border: 'none', borderRadius: '50px', padding: '10px 24px', cursor: 'pointer', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '3px', fontWeight: 500, transition: 'all 0.3s ease' }}
                                         onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}

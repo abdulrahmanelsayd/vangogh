@@ -10,6 +10,7 @@ const HeroHub = lazy(() => import('./pages/HeroHub'));
 const Gallery = lazy(() => import('./pages/Gallery'));
 const Biography = lazy(() => import('./pages/Biography'));
 const Community = lazy(() => import('./pages/Community'));
+const Profile = lazy(() => import('./pages/Profile'));
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -22,6 +23,7 @@ function AnimatedRoutes() {
         <Route path="/gallery" element={<Gallery />} />
         <Route path="/biography" element={<Biography />} />
         <Route path="/community" element={<Community />} />
+        <Route path="/profile/:id" element={<Profile />} />
       </Routes>
     </Suspense>
   );
