@@ -32,7 +32,7 @@ export default function EditProfileModal({ isOpen, onClose, user, currentProfile
         setAvatarPreview(previewUrl);
 
         try {
-            const compressed = await compressImage(f, { maxWidth: 1200, maxHeight: 1200, quality: 0.8 });
+            const compressed = await compressImage(f, { maxWidth: 1600, maxHeight: 1600, quality: 0.95 });
             setAvatarFile({ file: compressed.file, original: f });
         } catch (err) {
             console.error('Compression failed:', err);
