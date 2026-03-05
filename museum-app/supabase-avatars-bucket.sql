@@ -3,8 +3,8 @@ insert into storage.buckets (id, name, public)
 values ('avatars', 'avatars', true)
 on conflict (id) do nothing;
 
--- Enable Row Level Security
-alter table storage.objects enable row level security;
+-- Set up Row Level Security
+-- Note: RLS is enabled by default on storage.objects in Supabase
 
 -- Policy to allow anyone to read avatars
 create policy "Avatars are publicly accessible"
