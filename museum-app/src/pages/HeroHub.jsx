@@ -28,7 +28,7 @@ export default function HeroHub() {
             <div style={{
                 backgroundColor: '#000000',
                 color: '#ffffff',
-                minHeight: '300vh',
+                minHeight: '400vh',
                 position: 'relative'
             }}>
                 <div style={{ position: 'sticky', top: 0, height: '100vh', width: '100%', overflow: 'hidden' }}>
@@ -167,6 +167,42 @@ export default function HeroHub() {
                             Not a gallery. A spatial experience.<br />
                             Fluid digital architecture designed to let the work breathe. Step inside his eras.
                         </motion.p>
+                    </div>
+                </section>
+
+                {/* ─── CTA Cards ─── */}
+                <section style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, position: 'relative', backgroundColor: '#000000', padding: 'clamp(2rem, 8vw, 6rem)' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'clamp(1.5rem, 4vw, 3rem)', justifyContent: 'center', maxWidth: '900px', width: '100%' }}>
+                        {[
+                            { title: 'The Gallery', subtitle: '56 Masterpieces', desc: 'A 3D infinite scroll through every brushstroke.', path: '/gallery' },
+                            { title: 'The Biography', subtitle: 'Tragedy & Triumph', desc: 'The microscopic truth of a life lived in color.', path: '/biography' }
+                        ].map((card, i) => (
+                            <motion.div
+                                key={card.path}
+                                initial={{ opacity: 0, y: 40 }}
+                                whileInView={{ opacity: 1, y: 0 }}
+                                viewport={{ once: true }}
+                                transition={{ duration: 1, delay: i * 0.15, ease: [0.16, 1, 0.3, 1] }}
+                                onClick={() => navigate(card.path)}
+                                style={{
+                                    flex: '1 1 340px', maxWidth: '420px',
+                                    border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px',
+                                    padding: 'clamp(2rem, 5vw, 3.5rem)',
+                                    cursor: 'pointer',
+                                    background: 'rgba(255,255,255,0.02)',
+                                    backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                                    transition: 'all 0.5s cubic-bezier(0.16, 1, 0.3, 1)'
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; e.currentTarget.style.transform = 'translateY(-6px)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; }}
+                            >
+                                <p className="sans" style={{ fontSize: 'clamp(0.6rem, 1.5vw, 0.7rem)', letterSpacing: '4px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', margin: '0 0 1rem 0' }}>{card.subtitle}</p>
+                                <h3 className="serif" style={{ fontSize: 'clamp(2rem, 6vw, 2.8rem)', fontWeight: 300, margin: '0 0 1.2rem 0', color: '#ffffff', letterSpacing: '1px' }}>{card.title}</h3>
+                                <div style={{ width: '30px', height: '1px', backgroundColor: 'rgba(255,255,255,0.2)', margin: '0 0 1.2rem 0' }} />
+                                <p className="sans" style={{ fontSize: 'clamp(0.85rem, 2.5vw, 1rem)', lineHeight: 1.7, color: 'rgba(255,255,255,0.6)', margin: '0 0 2rem 0', fontWeight: 300 }}>{card.desc}</p>
+                                <span className="sans" style={{ fontSize: 'clamp(0.55rem, 1.5vw, 0.7rem)', letterSpacing: '3px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)' }}>Enter →</span>
+                            </motion.div>
+                        ))}
                     </div>
                 </section>
             </div>

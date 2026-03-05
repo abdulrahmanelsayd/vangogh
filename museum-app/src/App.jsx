@@ -1,22 +1,27 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import GlobalNavigation from './components/GlobalNavigation';
+import ErrorBoundary from './components/ErrorBoundary';
+import LoadingScreen from './components/LoadingScreen';
+import { AuthProvider } from './contexts/AuthContext';
 
 const Onboarding = lazy(() => import('./pages/Onboarding'));
 const HeroHub = lazy(() => import('./pages/HeroHub'));
 const Gallery = lazy(() => import('./pages/Gallery'));
 const Biography = lazy(() => import('./pages/Biography'));
+const Community = lazy(() => import('./pages/Community'));
 
 function AnimatedRoutes() {
   const location = useLocation();
 
   return (
-    <Suspense fallback={<div style={{ backgroundColor: '#000', width: '100vw', height: '100vh', position: 'fixed', zIndex: 99999 }} />}>
+    <Suspense fallback={<LoadingScreen />}>
       <Routes location={location} key={location.pathname}>
         <Route path="/" element={<Onboarding />} />
         <Route path="/hub" element={<HeroHub />} />
         <Route path="/gallery" element={<Gallery />} />
         <Route path="/biography" element={<Biography />} />
+        <Route path="/community" element={<Community />} />
       </Routes>
     </Suspense>
   );
@@ -25,16 +30,23 @@ function AnimatedRoutes() {
 function AppContent() {
   return (
     <>
+      <a href="#main-content" className="skip-nav sans">Skip to content</a>
       <GlobalNavigation />
-      <AnimatedRoutes />
+      <main id="main-content">
+        <AnimatedRoutes />
+      </main>
     </>
   );
 }
 
 export default function App() {
   return (
-    <Router>
-      <AppContent />
-    </Router>
+    <ErrorBoundary>
+      <AuthProvider>
+        <Router>
+          <AppContent />
+        </Router>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

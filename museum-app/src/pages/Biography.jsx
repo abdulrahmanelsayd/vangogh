@@ -3,7 +3,6 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { useTexture, Sparkles, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
-import { useNavigate } from 'react-router-dom';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import PageTransition from '../components/PageTransition';
 
@@ -64,7 +63,6 @@ function BackgroundScene() {
 }
 
 export default function Biography() {
-    const navigate = useNavigate();
 
     const narrativeData = [
         {

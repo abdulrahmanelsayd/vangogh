@@ -1,9 +1,8 @@
 import * as THREE from 'three';
-import React, { useRef, useState, Suspense, useMemo } from 'react';
+import React, { useRef, useState, useEffect, Suspense, useMemo } from 'react';
 import { Canvas, createPortal, useFrame, useThree } from '@react-three/fiber';
 import { useFBO, useGLTF, useScroll, Text, Image as ImageImpl, Scroll, Preload, ScrollControls, MeshTransmissionMaterial, useTexture } from '@react-three/drei';
 import { easing } from 'maath';
-import { useNavigate } from 'react-router-dom';
 import PageTransition from '../components/PageTransition';
 import { motion, AnimatePresence } from 'framer-motion';
 import { paintingsData } from '../data/paintingsData';
@@ -45,6 +44,9 @@ function Lens({ children, damping = 0.2, ...props }) {
 }
 
 const worldPos = new THREE.Vector3();
+const COLOR_WHITE = new THREE.Color('#ffffff');
+const COLOR_BLACK = new THREE.Color('#000000');
+const _tempColor = new THREE.Color();
 
 // Image component wrapped in Suspense for performant, individual loading
 function GalleryImageSuspended({ url, position, targetWidth, active, setActive }) {
@@ -73,11 +75,11 @@ function GalleryImageSuspended({ url, position, targetWidth, active, setActive }
         // Dim unactive items or highlight the focal painting dynamically without needing mouse hover
         let targetColorObj;
         if (isActive || hovered) {
-            targetColorObj = new THREE.Color('#ffffff');
+            targetColorObj = COLOR_WHITE;
         } else if (isAnyActive) {
-            targetColorObj = new THREE.Color('#000000');
+            targetColorObj = COLOR_BLACK;
         } else {
-            targetColorObj = new THREE.Color().setScalar(dynamicBrightness);
+            targetColorObj = _tempColor.setScalar(dynamicBrightness);
         }
 
         ref.current.material.color.lerp(targetColorObj, hovered || isActive ? 0.3 : 0.1)
@@ -263,8 +265,16 @@ function Typography() {
 }
 
 export default function Gallery() {
-    const navigate = useNavigate();
     const [active, setActive] = useState(null)
+
+    // Keyboard: Escape closes the active painting
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape' && active) setActive(null);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [active]);
 
     // 56 real high-res paintings mapping
     const TOTAL_PAINTINGS = 56;
@@ -293,6 +303,9 @@ export default function Gallery() {
                                 background: 'linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.7) 30%, rgba(0,0,0,0.98) 100%)',
                                 display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 'clamp(5vw, 12vw, 20vw)'
                             }}
+                            role="dialog"
+                            aria-label="Painting detail"
+                            aria-live="polite"
                         >
                             <motion.div
                                 key={active} // Force re-render of animation when active changes
@@ -347,7 +360,7 @@ export default function Gallery() {
                     The Infinite Gallery • Scroll Down
                 </motion.div>
 
-                <Canvas camera={{ position: [0, 0, 20], fov: 15 }}>
+                <Canvas camera={{ position: [0, 0, 20], fov: 15 }} dpr={[1, 1.5]}>
                     <color attach="background" args={['#000000']} />
                     <Suspense fallback={null}>
                         <ScrollControls damping={0.2} pages={pages} distance={0.5} enabled={!active}>
