@@ -59,7 +59,7 @@ export default function EditProfileModal({ isOpen, onClose, user, currentProfile
 
             // 1. Upload new avatar if selected
             if (avatarFile) {
-                const ext = avatarFile.file.name.split('.').pop() || 'jpg';
+                const ext = avatarFile.original.name.split('.').pop() || 'jpg';
                 const fileName = `${user.id}/avatar_${Date.now()}.${ext}`;
                 const { error: uploadErr } = await supabase.storage.from('avatars').upload(fileName, avatarFile.file);
                 if (uploadErr) {
