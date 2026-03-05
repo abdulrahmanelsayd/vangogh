@@ -61,7 +61,7 @@ function CommentItem({ comment, user, isReply, commentLikes, onLike, onReply, on
 }
 
 /* ─── Post Card ─── */
-export default function PostCard({ post, user, onLike, onDelete }) {
+export default function PostCard({ post, user, onLike, onDelete, isProfileView }) {
     const [liked, setLiked] = useState(post.user_liked);
     const [count, setCount] = useState(post.likes_count);
     const [imgLoaded, setImgLoaded] = useState(false);
