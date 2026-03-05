@@ -14,7 +14,7 @@ function CommentItem({ comment, user, isReply, commentLikes, onLike, onReply, on
             style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', paddingLeft: isReply ? '1.5rem' : 0 }}
         >
             {comment.user_avatar ? (
-                <img src={comment.user_avatar} alt="" style={{ width: size, height: size, borderRadius: '50%', flexShrink: 0, marginTop: '2px' }} />
+                <img src={comment.user_avatar} alt="" referrerPolicy="no-referrer" style={{ width: size, height: size, borderRadius: '50%', flexShrink: 0, marginTop: '2px' }} />
             ) : (
                 <div style={{ width: size, height: size, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', flexShrink: 0, marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.45rem', color: 'rgba(255,255,255,0.3)' }}>
                     {comment.user_name.charAt(0).toUpperCase()}
@@ -250,7 +250,7 @@ export default function PostCard({ post, user, onLike, onDelete, isProfileView }
                         onMouseLeave={e => !isProfileView && (e.currentTarget.style.opacity = 1)}
                     >
                         {post.user_avatar
-                            ? <img src={post.user_avatar} alt="" style={{ width: '26px', height: '26px', borderRadius: '50%', objectFit: 'cover' }} />
+                            ? <img src={post.user_avatar} alt="" referrerPolicy="no-referrer" style={{ width: '26px', height: '26px', borderRadius: '50%', objectFit: 'cover' }} />
                             : <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)' }}>{post.user_name.charAt(0).toUpperCase()}</div>
                         }
                         <span className="sans" style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', fontWeight: 500, letterSpacing: '0.5px' }}>{post.user_name}</span>

@@ -187,7 +187,7 @@ export default function Community() {
                                         onMouseLeave={e => e.currentTarget.style.opacity = 1}
                                     >
                                         {user.user_metadata?.avatar_url && (
-                                            <img src={user.user_metadata.avatar_url} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%' }} />
+                                            <img src={user.user_metadata.avatar_url} alt="" referrerPolicy="no-referrer" style={{ width: '28px', height: '28px', borderRadius: '50%' }} />
                                         )}
                                         <span className="sans" style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', letterSpacing: '0.5px' }}>
                                             {user.user_metadata?.full_name || user.email?.split('@')[0]}

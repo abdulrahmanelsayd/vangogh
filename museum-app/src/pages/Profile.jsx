@@ -188,7 +188,7 @@ export default function Profile() {
                             }}
                         >
                             {profileUser.avatar ? (
-                                <img src={profileUser.avatar} alt={profileUser.name} style={{ width: 'clamp(80px, 12vw, 120px)', height: 'clamp(80px, 12vw, 120px)', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.1)' }} />
+                                <img src={profileUser.avatar} alt={profileUser.name} referrerPolicy="no-referrer" style={{ width: 'clamp(80px, 12vw, 120px)', height: 'clamp(80px, 12vw, 120px)', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.1)' }} />
                             ) : (
                                 <div style={{
                                     width: 'clamp(80px, 12vw, 120px)', height: 'clamp(80px, 12vw, 120px)', borderRadius: '50%',
