@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import PageTransition from '../components/PageTransition';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 import PostCard from '../components/community/PostCard';
 import EditProfileModal from '../components/community/EditProfileModal';
+import { usePaginatedPosts } from '../hooks/usePaginatedPosts';
+import { usePostActions } from '../hooks/usePostActions';
+import { fetchProfile } from '../services/profileService';
+import { PROFILE_PAGE_SIZE } from '../constants';
 
 export default function Profile() {
     const { id } = useParams();
@@ -13,138 +16,21 @@ export default function Profile() {
     const { user } = useAuth();
 
     const [profileUser, setProfileUser] = useState(null);
-    const [posts, setPosts] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
 
-    // Pagination refs
-    const pageRef = useRef(0);
-    const hasMoreRef = useRef(true);
-    const loadingMoreRef = useRef(false);
-    const observerTarget = useRef(null);
+    const filter = useMemo(() => ({ user_id: id }), [id]);
 
-    /* ── Fetch Profile User Info & Posts ── */
-    const fetchProfileData = useCallback(async (reset = false) => {
-        if (!reset && (!hasMoreRef.current || loadingMoreRef.current)) return;
+    const {
+        posts, setPosts, loading, isLoadingMore, observerTarget, hasMore
+    } = usePaginatedPosts({ user, pageSize: PROFILE_PAGE_SIZE, filter });
 
-        const currentPage = reset ? 0 : pageRef.current;
-        if (reset) {
-            setLoading(true);
-            hasMoreRef.current = true;
-        } else {
-            loadingMoreRef.current = true;
-            setIsLoadingMore(true);
-        }
+    const { handleLike, handleDelete } = usePostActions(user, setPosts);
 
-        const start = currentPage * 12;
-        const end = start + 11; // Fetch 12 posts per page for profile grid
-
-        const { data, error } = await supabase
-            .from('posts').select('*')
-            .eq('user_id', id)
-            .order('created_at', { ascending: false })
-            .range(start, end);
-
-        if (error) {
-            console.error('Fetch error:', error);
-            if (reset) setLoading(false);
-            else { loadingMoreRef.current = false; setIsLoadingMore(false); }
-            return;
-        }
-
-        if (reset) {
-            // 1. Try to fetch from proper profiles table (gets bio)
-            const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', id).single();
-
-            if (profileRow) {
-                setProfileUser({
-                    id: profileRow.id,
-                    name: profileRow.full_name,
-                    avatar: profileRow.avatar_url,
-                    bio: profileRow.bio
-                });
-            } else if (id === user?.id) {
-                // 2. Fallback to auth context if viewing own profile but no row exists yet
-                setProfileUser({
-                    id: user.id,
-                    name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Visitor',
-                    avatar: user.user_metadata?.avatar_url,
-                    bio: ''
-                });
-            } else if (data?.length > 0) {
-                // 3. Fallback to post metadata for backwards compatibility
-                setProfileUser({
-                    id: data[0].user_id,
-                    name: data[0].user_name,
-                    avatar: data[0].user_avatar,
-                    bio: ''
-                });
-            }
-        }
-
-        if (data?.length) {
-            const postIds = data.map(p => p.id);
-            const { data: commentCounts } = await supabase.from('comments').select('post_id').is('parent_id', null).in('post_id', postIds);
-            const countMap = {};
-            (commentCounts || []).forEach(c => { countMap[c.post_id] = (countMap[c.post_id] || 0) + 1; });
-            data.forEach(p => p.comment_count = countMap[p.id] || 0);
-
-            if (user) {
-                const { data: userLikes } = await supabase
-                    .from('likes').select('post_id')
-                    .eq('user_id', user.id).in('post_id', postIds);
-                const likedSet = new Set((userLikes || []).map(l => l.post_id));
-                data.forEach(p => p.user_liked = likedSet.has(p.id));
-            }
-        }
-
-        hasMoreRef.current = data?.length === 12;
-
-        setPosts(prev => {
-            if (reset) return data || [];
-            const existingIds = new Set(prev.map(p => p.id));
-            const newPosts = (data || []).filter(p => !existingIds.has(p.id));
-            return [...prev, ...newPosts];
-        });
-
-        pageRef.current = currentPage + 1;
-        setLoading(false);
-        loadingMoreRef.current = false;
-        setIsLoadingMore(false);
-    }, [id, user]);
-
-    // Initial load
-    useEffect(() => { fetchProfileData(true); }, [fetchProfileData]);
-
-    // Intersection Observer for Infinite Scroll
     useEffect(() => {
-        const observer = new IntersectionObserver(
-            entries => { if (entries[0].isIntersecting) fetchProfileData(false); },
-            { threshold: 0.1, rootMargin: '400px' }
-        );
-        if (observerTarget.current) observer.observe(observerTarget.current);
-        return () => observer.disconnect();
-    }, [fetchProfileData]);
-
-    /* ── Like / Delete handlers ── */
-    const handleLike = async (postId, liked) => {
-        if (!user) return;
-        if (liked) {
-            await supabase.from('likes').insert({ user_id: user.id, post_id: postId });
-            await supabase.from('posts').update({ likes_count: posts.find(p => p.id === postId).likes_count + 1 }).eq('id', postId);
-        } else {
-            await supabase.from('likes').delete().eq('user_id', user.id).eq('post_id', postId);
-            await supabase.from('posts').update({ likes_count: Math.max(0, posts.find(p => p.id === postId).likes_count - 1) }).eq('id', postId);
-        }
-    };
-
-    const handleDelete = async (postId) => {
-        if (!confirm('Delete this post?')) return;
-        await supabase.from('likes').delete().eq('post_id', postId);
-        await supabase.from('posts').delete().eq('id', postId);
-        setPosts(prev => prev.filter(p => p.id !== postId));
-    };
+        fetchProfile(id, user, posts).then(profile => {
+            if (profile) setProfileUser(profile);
+        });
+    }, [id, user, posts.length]);
 
     return (
         <PageTransition>
@@ -156,7 +42,6 @@ export default function Profile() {
             }}>
                 <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 clamp(1.5rem, 4vw, 3rem)' }}>
 
-                    {/* ─── Back Button ─── */}
                     <button
                         onClick={() => navigate('/community')}
                         className="sans"
@@ -176,9 +61,8 @@ export default function Profile() {
                         Community
                     </button>
 
-                    {/* ─── Profile Header ─── */}
                     {loading && !posts.length ? (
-                        <div style={{ height: '120px' }}></div> // Spacer while loading
+                        <div style={{ height: '120px' }}></div>
                     ) : profileUser ? (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}
@@ -222,7 +106,7 @@ export default function Profile() {
                                 )}
 
                                 <p className="sans" style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.4)', margin: 0, letterSpacing: '1px', textTransform: 'uppercase' }}>
-                                    {posts.length === 0 ? 'No posts yet' : `${posts.length > 0 && !hasMoreRef.current ? posts.length : posts.length + '+'} Posts Shared`}
+                                    {posts.length === 0 ? 'No posts yet' : `${posts.length > 0 && !hasMore.current ? posts.length : posts.length + '+'} Posts Shared`}
                                 </p>
                             </div>
                         </motion.div>
@@ -234,7 +118,6 @@ export default function Profile() {
                         </div>
                     )}
 
-                    {/* ─── Posts Grid ─── */}
                     {loading && !posts.length ? (
                         <div style={{ textAlign: 'center', padding: '4rem 0' }}>
                             <motion.p animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 2, repeat: Infinity }}
@@ -257,7 +140,6 @@ export default function Profile() {
                                 </AnimatePresence>
                             </div>
 
-                            {/* Infinite Scroll target */}
                             <div ref={observerTarget} style={{ padding: '3rem 0', textAlign: 'center', height: '60px' }}>
                                 {isLoadingMore && (
                                     <motion.p animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 1.5, repeat: Infinity }}

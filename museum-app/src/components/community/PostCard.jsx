@@ -1,9 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase } from '../../lib/supabase';
 import { timeAgo } from '../../utils/timeAgo';
+import {
+    fetchComments as fetchCommentsFromDB,
+    fetchCommentLikes,
+    submitComment as submitCommentToDB,
+    toggleCommentLike,
+    deleteComment as deleteCommentFromDB
+} from '../../services/commentService';
+import { supabase } from '../../lib/supabase';
 
-/* ─── Comment Item (internal) ─── */
+
 function CommentItem({ comment, user, isReply, commentLikes, onLike, onReply, onDelete }) {
     const size = isReply ? '18px' : '20px';
     return (
@@ -28,7 +36,6 @@ function CommentItem({ comment, user, isReply, commentLikes, onLike, onReply, on
                 <p className="sans" style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.45)', lineHeight: 1.5, margin: '0.15rem 0 0.3rem 0', fontWeight: 300, wordBreak: 'break-word' }}>{comment.content}</p>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
-                    {/* Like */}
                     <button onClick={() => onLike(comment.id)}
                         style={{ background: 'none', border: 'none', cursor: user ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: '0.2rem', padding: 0 }}>
                         <svg width="11" height="11" viewBox="0 0 24 24" fill={commentLikes[comment.id] ? '#ef4444' : 'none'} stroke={commentLikes[comment.id] ? '#ef4444' : 'rgba(255,255,255,0.2)'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -37,7 +44,6 @@ function CommentItem({ comment, user, isReply, commentLikes, onLike, onReply, on
                         {(comment.likes_count || 0) > 0 && <span className="sans" style={{ fontSize: '0.58rem', color: commentLikes[comment.id] ? '#ef4444' : 'rgba(255,255,255,0.2)', fontWeight: 500 }}>{comment.likes_count}</span>}
                     </button>
 
-                    {/* Reply */}
                     {user && !isReply && (
                         <button onClick={() => onReply(comment)} className="sans"
                             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.58rem', color: 'rgba(255,255,255,0.2)', padding: 0, letterSpacing: '0.5px', transition: 'color 0.2s ease' }}
@@ -46,7 +52,6 @@ function CommentItem({ comment, user, isReply, commentLikes, onLike, onReply, on
                         >Reply</button>
                     )}
 
-                    {/* Delete */}
                     {user && user.id === comment.user_id && (
                         <button onClick={() => onDelete(comment.id)} aria-label="Delete comment"
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.1)', fontSize: '0.55rem', padding: 0, transition: 'color 0.2s ease' }}
@@ -60,8 +65,8 @@ function CommentItem({ comment, user, isReply, commentLikes, onLike, onReply, on
     );
 }
 
-/* ─── Post Card ─── */
 export default function PostCard({ post, user, onLike, onDelete, isProfileView }) {
+    const navigate = useNavigate();
     const [liked, setLiked] = useState(post.user_liked);
     const [count, setCount] = useState(post.likes_count);
     const [imgLoaded, setImgLoaded] = useState(false);
@@ -75,7 +80,6 @@ export default function PostCard({ post, user, onLike, onDelete, isProfileView }
     const [submitting, setSubmitting] = useState(false);
     const commentInputRef = useRef(null);
 
-    /* ── Post Like ── */
     const handleLike = async () => {
         if (!user) return;
         const next = !liked;
@@ -84,22 +88,18 @@ export default function PostCard({ post, user, onLike, onDelete, isProfileView }
         await onLike(post.id, next);
     };
 
-    /* ── Comments CRUD ── */
     const fetchComments = async () => {
         setLoadingComments(true);
-        const { data } = await supabase
-            .from('comments').select('*')
-            .eq('post_id', post.id)
-            .order('created_at', { ascending: true });
-        setComments(data || []);
+        try {
+            const data = await fetchCommentsFromDB(post.id);
+            setComments(data);
 
-        if (user && data?.length) {
-            const { data: myLikes } = await supabase
-                .from('comment_likes').select('comment_id')
-                .eq('user_id', user.id);
-            const map = {};
-            (myLikes || []).forEach(l => { map[l.comment_id] = true; });
-            setCommentLikes(map);
+            if (user && data.length) {
+                const likesMap = await fetchCommentLikes(user.id, data.map(c => c.id));
+                setCommentLikes(likesMap);
+            }
+        } catch (error) {
+            console.error('Failed to load comments:', error);
         }
         setLoadingComments(false);
     };
@@ -111,21 +111,23 @@ export default function PostCard({ post, user, onLike, onDelete, isProfileView }
         if (next) setTimeout(() => commentInputRef.current?.focus(), 200);
     };
 
-    const submitComment = async () => {
+    const handleSubmitComment = async () => {
         if (!user || !newComment.trim() || submitting) return;
         setSubmitting(true);
-        const payload = {
-            post_id: post.id, user_id: user.id,
-            user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Visitor',
-            user_avatar: user.user_metadata?.avatar_url || null,
-            content: newComment.trim(), parent_id: replyTo || null
-        };
-        const { data, error } = await supabase.from('comments').insert(payload).select().single();
-        if (!error && data) {
+        try {
+            const payload = {
+                post_id: post.id, user_id: user.id,
+                user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Visitor',
+                user_avatar: user.user_metadata?.avatar_url || null,
+                content: newComment.trim(), parent_id: replyTo || null
+            };
+            const data = await submitCommentToDB(payload);
             setComments(prev => [...prev, data]);
             if (!replyTo) setCommentCount(c => c + 1);
             setNewComment('');
             setReplyTo(null);
+        } catch (error) {
+            console.error('Failed to submit comment:', error);
         }
         setSubmitting(false);
     };
@@ -135,22 +137,27 @@ export default function PostCard({ post, user, onLike, onDelete, isProfileView }
         const wasLiked = commentLikes[id];
         setCommentLikes(prev => ({ ...prev, [id]: !wasLiked }));
         setComments(prev => prev.map(c => c.id === id ? { ...c, likes_count: (c.likes_count || 0) + (wasLiked ? -1 : 1) } : c));
-        if (wasLiked) {
-            await supabase.from('comment_likes').delete().eq('user_id', user.id).eq('comment_id', id);
-            await supabase.from('comments').update({ likes_count: Math.max(0, (comments.find(c => c.id === id)?.likes_count || 1) - 1) }).eq('id', id);
-        } else {
-            await supabase.from('comment_likes').insert({ user_id: user.id, comment_id: id });
-            await supabase.from('comments').update({ likes_count: (comments.find(c => c.id === id)?.likes_count || 0) + 1 }).eq('id', id);
+        try {
+            const current = comments.find(c => c.id === id);
+            await toggleCommentLike(user.id, id, wasLiked, current?.likes_count || 0);
+        } catch (error) {
+            console.error('Failed to toggle comment like:', error);
+            // Revert optimistic update
+            setCommentLikes(prev => ({ ...prev, [id]: wasLiked }));
+            setComments(prev => prev.map(c => c.id === id ? { ...c, likes_count: (c.likes_count || 0) + (wasLiked ? 1 : -1) } : c));
         }
     };
 
-    const deleteComment = async (id) => {
+    const handleDeleteComment = async (id) => {
         const target = comments.find(c => c.id === id);
         const isTopLevel = !target?.parent_id;
-        const repliesCount = isTopLevel ? comments.filter(c => c.parent_id === id).length : 0;
-        await supabase.from('comments').delete().eq('id', id);
-        setComments(prev => prev.filter(c => c.id !== id && c.parent_id !== id));
-        if (isTopLevel) setCommentCount(c => Math.max(0, c - 1));
+        try {
+            await deleteCommentFromDB(id);
+            setComments(prev => prev.filter(c => c.id !== id && c.parent_id !== id));
+            if (isTopLevel) setCommentCount(c => Math.max(0, c - 1));
+        } catch (error) {
+            console.error('Failed to delete comment:', error);
+        }
     };
 
     const startReply = (comment) => {
@@ -160,7 +167,7 @@ export default function PostCard({ post, user, onLike, onDelete, isProfileView }
     };
 
     const onKeyDown = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitComment(); }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(); }
         if (e.key === 'Escape') { setReplyTo(null); setNewComment(''); }
     };
 
@@ -239,7 +246,7 @@ export default function PostCard({ post, user, onLike, onDelete, isProfileView }
                     <div
                         onClick={(e) => {
                             e.stopPropagation();
-                            if (!isProfileView) window.location.href = `/profile/${post.user_id}`;
+                            if (!isProfileView) navigate(`/profile/${post.user_id}`);
                         }}
                         style={{
                             display: 'flex', alignItems: 'center', gap: '0.6rem',
@@ -306,9 +313,9 @@ export default function PostCard({ post, user, onLike, onDelete, isProfileView }
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: '280px', overflowY: 'auto', paddingRight: '4px', marginBottom: '0.6rem' }}>
                                         {topLevel.map(c => (
                                             <React.Fragment key={c.id}>
-                                                <CommentItem comment={c} user={user} isReply={false} commentLikes={commentLikes} onLike={likeComment} onReply={startReply} onDelete={deleteComment} />
+                                                <CommentItem comment={c} user={user} isReply={false} commentLikes={commentLikes} onLike={likeComment} onReply={startReply} onDelete={handleDeleteComment} />
                                                 {getReplies(c.id).map(r => (
-                                                    <CommentItem key={r.id} comment={r} user={user} isReply={true} commentLikes={commentLikes} onLike={likeComment} onReply={startReply} onDelete={deleteComment} />
+                                                    <CommentItem key={r.id} comment={r} user={user} isReply={true} commentLikes={commentLikes} onLike={likeComment} onReply={startReply} onDelete={handleDeleteComment} />
                                                 ))}
                                             </React.Fragment>
                                         ))}
@@ -332,7 +339,7 @@ export default function PostCard({ post, user, onLike, onDelete, isProfileView }
                                             style={{ flex: 1, background: 'rgba(255,255,255,0.04)', border: `1px solid ${replyTo ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)'}`, borderRadius: '8px', padding: '0.5rem 0.7rem', color: '#fff', fontSize: '0.72rem', outline: 'none', fontFamily: 'inherit', letterSpacing: '0.2px', transition: 'border-color 0.3s ease' }}
                                             onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
                                             onBlur={e => e.target.style.borderColor = replyTo ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)'} />
-                                        <button onClick={submitComment} disabled={!newComment.trim() || submitting} className="sans"
+                                        <button onClick={handleSubmitComment} disabled={!newComment.trim() || submitting} className="sans"
                                             style={{ background: newComment.trim() ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.06)', color: newComment.trim() ? '#000' : 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '8px', padding: '0.5rem 0.8rem', cursor: newComment.trim() ? 'pointer' : 'default', fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 600, transition: 'all 0.3s ease', flexShrink: 0 }}>
                                             {submitting ? '...' : replyTo ? 'Reply' : 'Post'}
                                         </button>

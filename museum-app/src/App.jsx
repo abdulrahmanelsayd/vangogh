@@ -11,6 +11,7 @@ const Gallery = lazy(() => import('./pages/Gallery'));
 const Biography = lazy(() => import('./pages/Biography'));
 const Community = lazy(() => import('./pages/Community'));
 const Profile = lazy(() => import('./pages/Profile'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -24,6 +25,7 @@ function AnimatedRoutes() {
         <Route path="/biography" element={<Biography />} />
         <Route path="/community" element={<Community />} />
         <Route path="/profile/:id" element={<Profile />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );

@@ -61,6 +61,9 @@ function GalleryImageSuspended({ url, position, targetWidth, active, setActive }
     const isActive = active === url
     const isAnyActive = active !== null
 
+    // Setup basic random phase for the breathing sine-wave
+    const [timeOffset] = useState(() => Math.random() * 100);
+
     useFrame((state, delta) => {
         if (!ref.current) return;
 
@@ -95,14 +98,38 @@ function GalleryImageSuspended({ url, position, targetWidth, active, setActive }
             ref.current.material.opacity = THREE.MathUtils.lerp(ref.current.material.opacity, 1.0, 0.05);
         }
 
-        // Make the active painting massive to take up the cinematic view
-        const targetScale = isActive ? [scale[0] * 2.8, scale[1] * 2.8, scale[2]] : (hovered && !isAnyActive ? [scale[0] * 1.05, scale[1] * 1.05, scale[2]] : scale);
+        // ── Cinematic Active State Math ──
+        // Calculate max scale dynamically so the painting takes its full natural aspect ratio 
+        // perfectly within the left-half of the screen, completely preventing clipping or overlapping.
+        const vW = state.viewport.getCurrentViewport(state.camera, [0, 0, 8]).width;
+        const vH = state.viewport.getCurrentViewport(state.camera, [0, 0, 8]).height;
+        
+        const maxScaleW = (vW * 0.45) / scale[0]; // 45% width max to clear the text sidebar
+        const maxScaleH = (vH * 0.8) / scale[1];  // 80% height max
+        const fitScale = Math.min(maxScaleW, maxScaleH);
+
+        // Subtle Ken Burns breathing for true cinema feel
+        const breathe = isActive ? Math.sin(state.clock.elapsedTime * 0.4 + timeOffset) * 0.015 : 0;
+        const activeScale = fitScale + breathe;
+
+        const targetScale = isActive 
+            ? [scale[0] * activeScale, scale[1] * activeScale, scale[2]] 
+            : (hovered && !isAnyActive ? [scale[0] * 1.05, scale[1] * 1.05, scale[2]] : scale);
+            
         easing.damp3(ref.current.scale, targetScale, 0.25, delta)
 
-        // Shifting massively toward the camera (+Z) and to the left (-X) for the layout
+        // ── Active Layout & Overlap Prevention ──
+        // Active: Pin perfectly to the left-center (15% offset) to clear the right-side text.
+        // Inactive: pushed deep back in Z (-15) to prevent any background clutter.
         const targetPosition = isActive
-            ? [position[0] - targetWidth * 1.5, position[1], position[2] + 8]
-            : (hovered && !isAnyActive ? [position[0], position[1], position[2] + 1] : position);
+            ? [-vW * 0.15, state.camera.position.y, 8] 
+            : (isAnyActive 
+                ? [position[0], position[1], position[2] - 15] 
+                : (hovered ? [position[0], position[1], position[2] + 1] : position));
+
+        // Plunge inactive paintings into absolute darkness (opacity 0) when one is selected
+        const targetOpacity = isAnyActive ? (isActive ? 1 : 0) : 1;
+        ref.current.material.opacity = THREE.MathUtils.lerp(ref.current.material.opacity, targetOpacity, 0.05);
 
         easing.damp3(ref.current.position, targetPosition, 0.35, delta)
     })
@@ -300,8 +327,8 @@ export default function Gallery() {
                             style={{
                                 position: 'absolute', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 50,
                                 pointerEvents: 'none',
-                                background: 'linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.7) 30%, rgba(0,0,0,0.98) 100%)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 'clamp(5vw, 12vw, 20vw)'
+                                background: 'linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,1) 100%)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 'clamp(5vw, 15vw, 25vw)'
                             }}
                             role="dialog"
                             aria-label="Painting detail"
@@ -320,7 +347,7 @@ export default function Gallery() {
                                 }}
                             >
                                 <div style={{ overflowY: 'auto', paddingRight: '20px', paddingBottom: '20px', WebkitMaskImage: 'linear-gradient(to bottom, black 80%, transparent 100%)' }}>
-                                    <h2 className="serif" style={{ fontSize: 'clamp(2rem, 8vw, 4rem)', fontWeight: 300, marginBottom: '1rem', letterSpacing: '-2px', textShadow: '0 10px 30px rgba(0,0,0,0.8)', lineHeight: 1.1 }}>
+                                    <h2 className="sans" style={{ fontSize: 'clamp(2rem, 6vw, 3.5rem)', fontWeight: 300, marginBottom: '1rem', letterSpacing: '-1px', textShadow: '0 10px 30px rgba(0,0,0,0.8)', lineHeight: 1.1 }}>
                                         {paintingsData[active.replace(/[^0-9]/g, '')]?.title || `Masterpiece ${active.replace(/[^0-9]/g, '')}`}
                                     </h2>
                                     <div style={{ width: '100%', height: '1px', background: 'linear-gradient(90deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0) 100%)', marginBottom: '2.5rem', flexShrink: 0 }} />

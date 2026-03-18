@@ -1,142 +1,27 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import PageTransition from '../components/PageTransition';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 import UploadModal from '../components/community/UploadModal';
 import PostCard from '../components/community/PostCard';
+import { usePaginatedPosts } from '../hooks/usePaginatedPosts';
+import { usePostActions } from '../hooks/usePostActions';
+import { useRealtimePosts } from '../hooks/useRealtimePosts';
+import { COMMUNITY_PAGE_SIZE, CHANNELS } from '../constants';
 
 export default function Community() {
+    const navigate = useNavigate();
     const { user, loading: authLoading, signInWithGoogle, signOut } = useAuth();
-    const [posts, setPosts] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [showUpload, setShowUpload] = useState(false);
 
-    // Pagination refs (useRef avoids dependency loops in effects)
-    const pageRef = useRef(0);
-    const hasMoreRef = useRef(true);
-    const loadingMoreRef = useRef(false);
-    const observerTarget = useRef(null);
+    const {
+        posts, setPosts, loading, isLoadingMore, observerTarget, refetch
+    } = usePaginatedPosts({ user, pageSize: COMMUNITY_PAGE_SIZE });
 
-    /* ── Fetch Posts (Initial & Pagination) ── */
-    const fetchPosts = useCallback(async (reset = false) => {
-        if (!reset && (!hasMoreRef.current || loadingMoreRef.current)) return;
+    const { handleLike, handleDelete } = usePostActions(user, setPosts);
 
-        const currentPage = reset ? 0 : pageRef.current;
-        if (reset) {
-            setLoading(true);
-            hasMoreRef.current = true;
-        } else {
-            loadingMoreRef.current = true;
-            setIsLoadingMore(true);
-        }
-
-        const start = currentPage * 10;
-        const end = start + 9; // Fetch 10 posts
-
-        const { data, error } = await supabase
-            .from('posts').select('*')
-            .order('created_at', { ascending: false })
-            .range(start, end);
-
-        if (error) {
-            console.error('Fetch error:', error);
-            if (reset) setLoading(false);
-            else { loadingMoreRef.current = false; setIsLoadingMore(false); }
-            return;
-        }
-
-        if (data?.length) {
-            const postIds = data.map(p => p.id);
-            const { data: commentCounts } = await supabase.from('comments').select('post_id').is('parent_id', null).in('post_id', postIds);
-            const countMap = {};
-            (commentCounts || []).forEach(c => { countMap[c.post_id] = (countMap[c.post_id] || 0) + 1; });
-            data.forEach(p => p.comment_count = countMap[p.id] || 0);
-
-            if (user) {
-                const { data: userLikes } = await supabase
-                    .from('likes').select('post_id')
-                    .eq('user_id', user.id).in('post_id', postIds);
-                const likedSet = new Set((userLikes || []).map(l => l.post_id));
-                data.forEach(p => p.user_liked = likedSet.has(p.id));
-            }
-        }
-
-        hasMoreRef.current = data?.length === 10;
-
-        setPosts(prev => {
-            if (reset) return data || [];
-            // Prevent duplicates (e.g., if realtime inserted it)
-            const existingIds = new Set(prev.map(p => p.id));
-            const newPosts = (data || []).filter(p => !existingIds.has(p.id));
-            return [...prev, ...newPosts];
-        });
-
-        pageRef.current = currentPage + 1;
-        setLoading(false);
-        loadingMoreRef.current = false;
-        setIsLoadingMore(false);
-    }, [user]);
-
-    // Initial load when user changes
-    useEffect(() => { fetchPosts(true); }, [fetchPosts]);
-
-    // Intersection Observer for Infinite Scroll
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            entries => {
-                if (entries[0].isIntersecting) {
-                    fetchPosts(false);
-                }
-            },
-            { threshold: 0.1, rootMargin: '200px' } // Trigger 200px before bottom
-        );
-
-        if (observerTarget.current) observer.observe(observerTarget.current);
-        return () => observer.disconnect();
-    }, [fetchPosts]);
-
-    /* ── Realtime: live posts feed ── */
-    useEffect(() => {
-        const channel = supabase
-            .channel('community-posts')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (payload) => {
-                const newPost = { ...payload.new, comment_count: 0, user_liked: false };
-                setPosts(prev => [newPost, ...prev]);
-            })
-            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, (payload) => {
-                setPosts(prev => prev.filter(p => p.id !== payload.old.id));
-            })
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'posts' }, (payload) => {
-                setPosts(prev => prev.map(p => p.id === payload.new.id
-                    ? { ...p, likes_count: payload.new.likes_count, caption: payload.new.caption }
-                    : p
-                ));
-            })
-            .subscribe();
-
-        return () => { supabase.removeChannel(channel); };
-    }, []);
-
-    /* ── Like / Delete handlers ── */
-    const handleLike = async (postId, liked) => {
-        if (!user) return;
-        if (liked) {
-            await supabase.from('likes').insert({ user_id: user.id, post_id: postId });
-            await supabase.from('posts').update({ likes_count: posts.find(p => p.id === postId).likes_count + 1 }).eq('id', postId);
-        } else {
-            await supabase.from('likes').delete().eq('user_id', user.id).eq('post_id', postId);
-            await supabase.from('posts').update({ likes_count: Math.max(0, posts.find(p => p.id === postId).likes_count - 1) }).eq('id', postId);
-        }
-    };
-
-    const handleDelete = async (postId) => {
-        if (!confirm('Delete this post?')) return;
-        await supabase.from('likes').delete().eq('post_id', postId);
-        await supabase.from('posts').delete().eq('id', postId);
-        setPosts(prev => prev.filter(p => p.id !== postId));
-    };
+    useRealtimePosts(CHANNELS.COMMUNITY_POSTS, setPosts);
 
     return (
         <PageTransition>
@@ -147,7 +32,6 @@ export default function Community() {
                 paddingBottom: '6rem'
             }}>
                 <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 clamp(1.5rem, 4vw, 3rem)' }}>
-                    {/* ─── Header ─── */}
                     <motion.p
                         initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                         transition={{ duration: 1, delay: 0.2 }}
@@ -168,7 +52,6 @@ export default function Community() {
                         style={{ height: '1px', backgroundColor: 'rgba(255,255,255,0.2)', marginBottom: '2rem' }}
                     />
 
-                    {/* ─── Auth + Upload Row ─── */}
                     <motion.div
                         initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                         transition={{ duration: 0.8, delay: 0.5 }}
@@ -182,7 +65,7 @@ export default function Community() {
                             {authLoading ? null : user ? (
                                 <>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', transition: 'opacity 0.2s ease' }}
-                                        onClick={() => window.location.href = `/profile/${user.id}`}
+                                        onClick={() => navigate(`/profile/${user.id}`)}
                                         onMouseEnter={e => e.currentTarget.style.opacity = 0.8}
                                         onMouseLeave={e => e.currentTarget.style.opacity = 1}
                                     >
@@ -193,7 +76,7 @@ export default function Community() {
                                             {user.user_metadata?.full_name || user.email?.split('@')[0]}
                                         </span>
                                     </div>
-                                    <button onClick={() => window.location.href = `/profile/${user.id}`} className="sans"
+                                    <button onClick={() => navigate(`/profile/${user.id}`)} className="sans"
                                         style={{ background: 'transparent', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '50px', padding: '10px 18px', cursor: 'pointer', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '2px', transition: 'all 0.3s ease' }}
                                         onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'; e.currentTarget.style.color = '#fff'; }}
                                         onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; e.currentTarget.style.color = 'rgba(255,255,255,0.6)'; }}
@@ -227,7 +110,6 @@ export default function Community() {
                         </div>
                     </motion.div>
 
-                    {/* ─── Posts Grid ─── */}
                     {loading ? (
                         <div style={{ textAlign: 'center', padding: '4rem 0' }}>
                             <motion.p animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 2, repeat: Infinity }}
@@ -254,7 +136,6 @@ export default function Community() {
                                 </AnimatePresence>
                             </div>
 
-                            {/* Infinite Scroll Observer Target */}
                             <div ref={observerTarget} style={{ padding: '3rem 0', textAlign: 'center', height: '60px' }}>
                                 {isLoadingMore && (
                                     <motion.p animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 1.5, repeat: Infinity }}
@@ -268,7 +149,7 @@ export default function Community() {
                 </div>
 
                 <AnimatePresence>
-                    {showUpload && <UploadModal onClose={() => setShowUpload(false)} onUploaded={() => fetchPosts(true)} />}
+                    {showUpload && <UploadModal onClose={() => setShowUpload(false)} onUploaded={refetch} />}
                 </AnimatePresence>
             </div>
         </PageTransition>

@@ -40,7 +40,7 @@ export default function HeroHub() {
                         muted
                         playsInline
                         poster="/abouthero.webp"
-                        fetchpriority="high"
+                        fetchPriority="high"
                         style={{
                             position: 'absolute',
                             width: '100%',
